@@ -112,90 +112,53 @@ async function scrape() {
     // Haetaan tapahtumadata suoraan sivun DOM:sta
     rawEvents = await page.evaluate(() => {
       const results = [];
+      const SKIP = /^(löydä liput|osta liput|buy tickets|lisää tietoa|lue lisää)$/i;
+      const DAY  = /^(MA|TI|KE|TO|PE|LA|SU)$/i;
+      const DATE = /^\d{1,2}\.\d{2}\.?$/;
+      const TIME = /^\d{2}:\d{2}$/;
 
-      // ── Strategia 1: article-elementit (WordPress-standardi) ──
       document.querySelectorAll('article').forEach(art => {
-        const titleEl = art.querySelector('h1,h2,h3,.entry-title,.event-title,.gig-title,a');
-        const name = titleEl?.textContent?.trim();
+        // Pilko innerText riveiksi, siivoa tyhjät ja CTA-tekstit
+        const lines = (art.innerText || '')
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => l.length > 0 && !SKIP.test(l));
+
+        if (lines.length < 3) return;
+
+        // Etsi viikonpäivä ("LA") ja päivämäärä ("18.04.")
+        const dayIdx  = lines.findIndex(l => DAY.test(l));
+        const dateIdx = lines.findIndex(l => DATE.test(l));
+        if (dateIdx === -1) return;
+
+        // Nimi on ensimmäinen "normaali" rivi päivämäärän jälkeen
+        const afterDate = Math.max(dayIdx, dateIdx) + 1;
+        const name = lines[afterDate];
         if (!name || name.length < 2) return;
 
-        // Päivämäärä: etsitään kaikista teksteistä
-        const allText = art.innerText || '';
-        const dateMatch = allText.match(/(?:ma|ti|ke|to|pe|la|su)?\s*\d{1,2}\.\d{1,2}\.(?:\d{4})?/i);
-        const timeMatch = allText.match(/(?:klo\s*)?(\d{2}:\d{2})/);
+        // Päivä + päivämäärä raakadataksi
+        const dateRaw = [
+          dayIdx >= 0 ? lines[dayIdx] : '',
+          lines[dateIdx],
+        ].filter(Boolean).join(' ');
 
-        // Paikka: etsitään tyypillisistä elementeistä
-        const venueEl = art.querySelector('.venue,.event-venue,.location,.place,.club-name,.event-location');
-        const venue = venueEl?.textContent?.trim() || '';
+        // Paikka ja hinta: seuraava rivi nimen jälkeen ("Nokia-areena, Tampere - alk. 59,90")
+        const venuePriceLine = lines[afterDate + 1] || '';
+        let venue = '';
+        let price = '';
+        if (venuePriceLine.includes(' - alk. ')) {
+          const parts = venuePriceLine.split(' - alk. ');
+          venue = parts[0].split(',')[0].trim();
+          price = 'alk. ' + parts[1].trim();
+        } else {
+          venue = venuePriceLine.split(',')[0].trim();
+        }
 
-        // Hinta
-        const priceEl = art.querySelector('.price,.event-price,.ticket-price');
-        const price = priceEl?.textContent?.trim() || '';
+        const timeLine = lines.find(l => TIME.test(l)) || '';
+        const url = art.querySelector('a[href]')?.href || '';
 
-        // URL
-        const linkEl = art.querySelector('a[href]');
-        const url = linkEl?.href || '';
-
-        results.push({
-          name,
-          venue,
-          dateRaw: dateMatch?.[0] || '',
-          timeRaw: timeMatch?.[1] || '',
-          price,
-          url,
-        });
+        results.push({ name, venue, dateRaw, timeRaw: timeLine, price, url });
       });
-
-      if (results.length > 0) return results;
-
-      // ── Strategia 2: lista-itemit ──
-      const listSelectors = [
-        '.event-list-item', '.gig-list-item', '.event-row',
-        '.event_item', '.concert-item', '.listing-item',
-        'li.event', 'li.gig', '.events-list li',
-      ];
-
-      for (const sel of listSelectors) {
-        document.querySelectorAll(sel).forEach(item => {
-          const name = item.querySelector('h2,h3,.title,a')?.textContent?.trim();
-          if (!name) return;
-          const allText = item.innerText || '';
-          const dateMatch = allText.match(/(?:ma|ti|ke|to|pe|la|su)?\s*\d{1,2}\.\d{1,2}\.(?:\d{4})?/i);
-          const timeMatch = allText.match(/(\d{2}:\d{2})/);
-          results.push({
-            name,
-            venue: item.querySelector('.venue,.location')?.textContent?.trim() || '',
-            dateRaw: dateMatch?.[0] || '',
-            timeRaw: timeMatch?.[1] || '',
-            price: item.querySelector('.price')?.textContent?.trim() || '',
-            url: item.querySelector('a')?.href || '',
-          });
-        });
-        if (results.length > 0) break;
-      }
-
-      // ── Strategia 3: kaikki linkit joissa on päivämäärä lähellä ──
-      if (results.length === 0) {
-        document.querySelectorAll('a[href]').forEach(a => {
-          const text = a.textContent?.trim();
-          if (!text || text.length < 2) return;
-          const parent = a.closest('div,li,tr,section') || a.parentElement;
-          const allText = parent?.innerText || a.innerText || '';
-          if (!/\d{1,2}\.\d{1,2}\./.test(allText)) return;
-          const dateMatch = allText.match(/(?:ma|ti|ke|to|pe|la|su)?\s*\d{1,2}\.\d{1,2}\.(?:\d{4})?/i);
-          const timeMatch = allText.match(/(\d{2}:\d{2})/);
-          if (dateMatch) {
-            results.push({
-              name: text,
-              venue: '',
-              dateRaw: dateMatch[0],
-              timeRaw: timeMatch?.[1] || '',
-              price: '',
-              url: a.href || '',
-            });
-          }
-        });
-      }
 
       return results;
     });
