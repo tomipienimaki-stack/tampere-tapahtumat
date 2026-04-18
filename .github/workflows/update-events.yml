@@ -1,0 +1,47 @@
+name: Päivitä tapahtumat meteli.net:stä
+
+on:
+  schedule:
+    # Joka maanantai klo 05:00 UTC (08:00 Suomen aikaa)
+    - cron: '0 5 * * 1'
+  # Voi ajaa myös käsin GitHub Actions -sivulta
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Asenna riippuvuudet
+        run: npm install
+
+      - name: Aja scraper
+        run: node scripts/scrape-meteli.js
+
+      - name: Tarkista onko muutoksia
+        id: changes
+        run: |
+          git diff --quiet index.html && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commitoi päivitys
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          COUNT=$(grep -o '"_scraped":true' index.html | wc -l || echo "?")
+          DATE=$(date +'%-d.%-m.%Y')
+          git add index.html
+          git commit -m "auto: päivitä tapahtumat ${DATE} (meteli.net, ~${COUNT} kpl)"
+          git push

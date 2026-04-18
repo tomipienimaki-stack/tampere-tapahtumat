@@ -1,0 +1,13 @@
+{
+  "name": "tampere-tapahtumat",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Tampere tapahtumat -sovellus",
+  "scripts": {
+    "scrape": "node scripts/scrape-meteli.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}
