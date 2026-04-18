@@ -23,9 +23,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Asenna riippuvuudet
-        run: npm install
-
       - name: Aja scraper
         run: node scripts/scrape-meteli.js
 
