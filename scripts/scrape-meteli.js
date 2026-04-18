@@ -97,29 +97,35 @@ async function scrape() {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
+    // Blokataan Gravito CMP (GDPR-evästepopup) ja Piano (paywall) —
+    // muuten sivu ei renderöi tapahtumia ennen käyttäjän hyväksyntää
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      const url = req.url();
+      if (url.includes('gravito') || url.includes('gravitocmp') || url.includes('piano.io')) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     console.log(`Avataan: ${METELI_URL}`);
     await page.goto(METELI_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Odota että JavaScript renderöi tapahtumat (article-elementit)
+    // Odota Alpine.js:n renderöimät article-elementit
     try {
       await page.waitForSelector('article', { timeout: 15000 });
       console.log('article-elementit löytyivät');
     } catch {
-      console.log('article-elementtejä ei löytynyt 15s sisällä — tulostetaan HTML');
-      // Debug: tulosta sivun HTML-rakenne
-      const snippet = await page.evaluate(() => {
-        const body = document.body;
-        // Ylätason elementtien tagit
-        const tags = Array.from(body.children).map(el => el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + [...el.classList].join('.') : '')).join(', ');
-        return {
-          tags,
-          bodyText: body.innerText?.slice(0, 1000) || '',
-          title: document.title,
-        };
-      });
-      console.log('Sivun otsikko:', snippet.title);
-      console.log('Body-lapset:', snippet.tags);
-      console.log('Body-teksti:\n', snippet.bodyText);
+      console.log('article-elementtejä ei löytynyt — tulostetaan body-rakenne');
+      const info = await page.evaluate(() => ({
+        tags: Array.from(document.body.children)
+          .map(el => el.tagName + (el.id ? '#'+el.id : '') + (el.className ? '.'+[...el.classList].slice(0,2).join('.') : ''))
+          .join(', '),
+        text: document.body.innerText?.slice(0, 800) || '(tyhjä)',
+      }));
+      console.log('Body-lapset:', info.tags);
+      console.log('Body-teksti:', info.text);
     }
 
     // Kuuntele browser-konsoliviestit debuggausta varten
