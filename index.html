@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#C8102E">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Tampere – Mitä tapahtuu?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root{--red:#C8102E;--red-l:#fce8eb;--bg:#f0f2f5;--card:#fff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;--nav-h:60px;--hdr-h:54px;--r:14px;--sh:0 2px 10px rgba(0,0,0,.09)}
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+
+    /* HEADER */
+    #hdr{position:fixed;top:0;left:0;right:0;height:var(--hdr-h);background:var(--red);display:flex;align-items:center;padding:0 16px;gap:10px;z-index:900}
+    .hdr-logo{width:30px;height:30px;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:var(--red);flex-shrink:0}
+    .hdr-text{flex:1;color:#fff}.hdr-text h1{font-size:15px;font-weight:800}.hdr-text p{font-size:10.5px;opacity:.82}
+
+    /* NAV */
+    #nav{position:fixed;bottom:0;left:0;right:0;height:var(--nav-h);background:var(--card);border-top:1px solid var(--border);display:flex;z-index:900;padding-bottom:env(safe-area-inset-bottom)}
+    .nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;border:none;cursor:pointer;color:var(--muted);font-size:9.5px;font-family:inherit;font-weight:600;position:relative;padding:6px 2px}
+    .nb.on{color:var(--red)}.nb.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2.5px;background:var(--red);border-radius:0 0 3px 3px}
+    .nb-icon{font-size:21px;line-height:1}
+
+    /* MAIN */
+    #main{position:fixed;top:var(--hdr-h);bottom:var(--nav-h);left:0;right:0;overflow:hidden}
+    .view{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden}.view.on{display:flex}
+
+    /* SHARED: chips */
+    .chips-bar{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0}
+    .chips-bar::-webkit-scrollbar{display:none}
+    .chip{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--card);font-size:12px;font-family:inherit;font-weight:600;cursor:pointer;white-space:nowrap;color:var(--muted)}
+    .chip.on{border-color:var(--red);background:var(--red-l);color:var(--red)}
+
+    /* ══ VIIKONLOPPU VIEW ══ */
+    #wk-view{background:var(--bg)}
+    #wk-hdr{background:var(--card);padding:14px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+    .wk-title-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+    .wk-main-title{font-size:20px;font-weight:800}.wk-dates{font-size:13px;color:var(--muted)}
+    .wk-day-tabs{display:flex;gap:6px}
+    .wk-tab{flex:1;padding:9px 4px;border-radius:10px;border:2px solid var(--border);background:var(--card);font-size:12px;font-family:inherit;font-weight:600;cursor:pointer;text-align:center;color:var(--muted);line-height:1.4}
+    .wk-tab.on{border-color:var(--red);background:var(--red-l);color:var(--red)}
+    .tab-cnt{display:inline-block;font-size:10px;font-weight:700;border-radius:10px;padding:1px 5px}
+    .wk-tab.on .tab-cnt{background:var(--red);color:#fff}.wk-tab:not(.on) .tab-cnt{background:var(--muted);color:#fff}
+    #wk-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 16px 8px}
+    .section-lbl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:14px 0 7px}
+    .no-evts{text-align:center;padding:30px 0;color:var(--muted);font-size:14px}
+
+    /* ══ BIG CARD ══ */
+    .big-card{border-radius:16px;overflow:hidden;margin-bottom:10px;box-shadow:var(--sh);cursor:pointer}
+    .big-card:active{opacity:.9}
+    .bc-banner{padding:14px 16px 12px;display:flex;flex-direction:column;gap:4px;position:relative}
+    .bc-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.4);color:#fff;font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:3px 8px;border-radius:20px;align-self:flex-start;margin-bottom:4px}
+    .bc-name{font-size:19px;font-weight:800;color:#fff;line-height:1.2}
+    .bc-sub{font-size:12px;color:rgba(255,255,255,.85);margin-top:2px}
+    .bc-foot{background:#fff;padding:11px 16px;display:flex;align-items:center;gap:8px}
+    .bc-meta{flex:1;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+    .bc-meta strong{color:var(--text);font-size:13px}
+    .bc-price{font-weight:800;font-size:13px;white-space:nowrap}
+    .bc-arrow{font-size:22px;color:var(--muted)}
+
+    /* ══ SPORT CARD ══ */
+    .sport-card{background:var(--card);border-radius:var(--r);margin-bottom:8px;box-shadow:var(--sh);cursor:pointer;overflow:hidden;display:flex}
+    .sport-card:active{opacity:.9}
+    .sc-stripe{width:5px;flex-shrink:0}
+    .sc-body{flex:1;padding:12px 14px;display:flex;align-items:center;gap:10px}
+    .sc-icon{font-size:24px;flex-shrink:0}
+    .sc-info{flex:1;min-width:0}
+    .sc-teams{font-size:14px;font-weight:700;line-height:1.3}
+    .sc-meta{font-size:12px;color:var(--muted);margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}
+    .sc-league{font-size:10px;font-weight:700;background:var(--bg);color:var(--muted);border-radius:6px;padding:2px 6px;white-space:nowrap}
+    .sc-price{font-size:12px;font-weight:700;color:var(--red);background:var(--red-l);padding:4px 8px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+
+    /* ══ GIG CARD ══ */
+    .gig-card{background:var(--card);border-radius:var(--r);margin-bottom:8px;box-shadow:var(--sh);cursor:pointer}
+    .gig-card:active{opacity:.87}
+    .gc-body{padding:13px 14px 10px}
+    .gc-top{display:flex;align-items:flex-start;gap:10px}
+    .gc-left{flex:1;min-width:0}
+    .gc-name{font-size:15px;font-weight:800;margin-bottom:3px;line-height:1.25}
+    .gc-sub{font-size:12px;color:var(--muted);margin-bottom:7px;display:flex;gap:6px;flex-wrap:wrap}
+    .gc-price{flex-shrink:0;font-size:12px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;margin-top:1px}
+    .gc-price.paid{color:var(--red);background:var(--red-l)}.gc-price.free{color:#059669;background:#d1fae5}
+    .genre-pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+    .g-pill{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+    .gc-soundslike{font-size:11.5px;color:var(--muted);font-style:italic;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);line-height:1.5}
+
+    /* ══ NORMAL EV CARD ══ */
+    .ev-card{background:var(--card);border-radius:var(--r);padding:13px 14px;margin-bottom:8px;box-shadow:var(--sh);cursor:pointer;display:flex;gap:10px;align-items:flex-start}
+    .ev-card:active{opacity:.85}
+    .ev-left{flex:1;min-width:0}
+    .cat-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;margin-bottom:5px}
+    .ev-name{font-size:14px;font-weight:700;line-height:1.3;margin-bottom:3px}
+    .ev-meta{font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:5px}
+    .price-tag{flex-shrink:0;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:8px;white-space:nowrap;margin-top:1px}
+    .price-tag.paid{color:var(--red);background:var(--red-l)}.price-tag.free{color:#059669;background:#d1fae5}
+
+    /* ══ TULOSSA VIEW ══ */
+    #tu-view{background:var(--bg)}
+    #tu-filter{background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;flex-shrink:0}
+    #tu-filter::-webkit-scrollbar{display:none}
+    #tu-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+    /* weekend block */
+    .wk-block{margin:12px 16px 0}
+    .wk-block-hdr{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--card);border-radius:var(--r) var(--r) 0 0;border-bottom:2px solid var(--red);cursor:pointer}
+    .wk-block-hdr:active{background:var(--bg)}
+    .wk-block-dates{font-size:14px;font-weight:800;flex:1}
+    .wk-block-cnt{font-size:11px;font-weight:700;color:var(--muted)}
+    .wk-block-toggle{font-size:18px;color:var(--muted);transition:transform .2s}
+    .wk-block.collapsed .wk-block-toggle{transform:rotate(-90deg)}
+    .wk-block-body{background:var(--card);border-radius:0 0 var(--r) var(--r);overflow:hidden;margin-bottom:4px}
+    .wk-block.collapsed .wk-block-body{display:none}
+
+    /* compact event row inside tulossa block */
+    .tu-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--border);cursor:pointer}
+    .tu-row:active{background:var(--bg)}
+    .tu-row-left{flex:1;min-width:0}
+    .tu-row-name{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tu-row-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+    .tu-row-price{font-size:12px;font-weight:700;white-space:nowrap;color:var(--red);flex-shrink:0}
+    .tu-row-price.free{color:#059669}
+    .tu-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+    .tu-big-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(200,16,46,.15)}
+    .tu-sport-icon{font-size:18px;flex-shrink:0;width:22px;text-align:center}
+    .tu-badge-big{font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--red);background:var(--red-l);padding:1px 5px;border-radius:4px}
+    .tu-genre-pills{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+    .tu-arrow{font-size:18px;color:var(--border);flex-shrink:0}
+    .tu-empty{text-align:center;padding:12px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--border)}
+    .no-wk-block{text-align:center;padding:40px 20px;color:var(--muted);font-size:14px}
+
+    /* ══ MAP VIEW ══ */
+    #map-view{background:var(--bg)}
+    #map-wrap{flex:1;position:relative}
+    #map{height:100%;width:100%}
+    #msearch{position:absolute;top:10px;left:10px;right:10px;z-index:800;background:#fff;border-radius:12px;box-shadow:var(--sh);display:flex;align-items:center;padding:0 14px;gap:8px}
+    #msearch input{flex:1;border:none;outline:none;font-size:14px;font-family:inherit;padding:12px 0}
+    #map-sheet{background:var(--card);border-radius:20px 20px 0 0;max-height:40vh;overflow-y:auto;box-shadow:0 -4px 20px rgba(0,0,0,.13);flex-shrink:0}
+    .sh-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:10px auto 4px}
+    .sh-title{padding:6px 16px 10px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+    .map-ev{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--border);cursor:pointer}
+    .map-ev:active{background:var(--bg)}
+    .map-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+    .map-ev-name{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .map-ev-sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+
+    /* ══ SEARCH VIEW ══ */
+    #search-view{background:var(--bg)}
+    #s-top{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px 8px;flex-shrink:0}
+    .s-input{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:12px;padding:13px 16px;font-size:16px;font-family:inherit;outline:none;transition:border-color .15s}
+    .s-input:focus{border-color:var(--red)}
+    #s-chips{flex-shrink:0}
+    #s-results{flex:1;overflow-y:auto;padding:12px 16px 8px}
+    .s-ph{text-align:center;color:var(--muted);margin-top:40px;font-size:14px;line-height:1.7}
+    .s-ph .em{font-size:42px;display:block;margin-bottom:10px}
+
+    /* ══ MODAL ══ */
+    #m-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:none;align-items:flex-end}
+    #m-ov.on{display:flex}
+    #modal{background:var(--card);border-radius:22px 22px 0 0;width:100%;max-height:90vh;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom);animation:up .25s ease}
+    @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+    .m-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 0}
+    .m-banner{padding:18px 20px;position:relative}
+    .m-banner-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.2);border:1.5px solid rgba(255,255,255,.35);color:#fff;font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:3px 8px;border-radius:20px;margin-bottom:8px}
+    .m-banner h2{font-size:21px;font-weight:800;color:#fff;line-height:1.25}
+    .m-banner p{font-size:13px;color:rgba(255,255,255,.85);margin-top:4px}
+    .m-close-b{position:absolute;top:14px;right:16px;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .m-hdr{padding:16px 20px 4px;display:flex;align-items:flex-start;gap:10px}
+    .m-title{flex:1}.m-title h2{font-size:19px;font-weight:800;line-height:1.3;margin-top:6px}
+    .m-close2{width:34px;height:34px;border-radius:50%;background:var(--bg);border:none;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .m-body{padding:4px 20px 24px}
+    .m-row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--border);font-size:13.5px}
+    .m-icon{font-size:17px;width:22px;text-align:center;margin-top:1px;flex-shrink:0}
+    .m-lbl{font-size:11px;color:var(--muted);margin-bottom:1px}
+    .m-genre-block{padding:12px 0;border-bottom:1px solid var(--border)}
+    .m-genre-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+    .m-sl{font-size:13px;color:var(--muted);font-style:italic;line-height:1.55;padding:10px 12px;background:var(--bg);border-radius:10px;border-left:3px solid var(--border)}
+    .listen-btns{display:flex;gap:8px;margin-top:12px}
+    .listen-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 8px;border-radius:12px;border:none;font-size:13px;font-family:inherit;font-weight:700;cursor:pointer;text-decoration:none}
+    .listen-btn.sp{background:#1DB954;color:#fff}.listen-btn.yt{background:#FF0000;color:#fff}
+    .m-desc{font-size:13.5px;line-height:1.65;margin:14px 0 10px}
+    .m-cta{display:block;width:100%;padding:15px;background:var(--red);color:#fff;border:none;border-radius:12px;font-size:15px;font-family:inherit;font-weight:700;text-align:center;text-decoration:none;cursor:pointer;margin-top:10px}
+    .m-sport-hdr{padding:18px 20px 14px;display:flex;flex-direction:column;align-items:center;gap:6px}
+    .m-teams{display:flex;align-items:center;gap:10px;width:100%}
+    .m-team{flex:1;text-align:center}
+    .m-team-name{font-size:17px;font-weight:800}.m-team-sub{font-size:10px;color:var(--muted)}
+    .m-vs{font-size:20px;font-weight:800;color:var(--muted);flex-shrink:0}
+    ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  </style>
+</head>
+<body>
+<header id="hdr">
+  <div class="hdr-logo">T</div>
+  <div class="hdr-text"><h1>Tampere</h1><p>Mitä tapahtuu?</p></div>
+</header>
+
+<main id="main">
+
+  <!-- VIIKONLOPPU -->
+  <div class="view on" id="wk-view">
+    <div id="wk-hdr">
+      <div class="wk-title-row">
+        <span class="wk-main-title">Tämä viikonloppu</span>
+        <span class="wk-dates" id="wk-range"></span>
+      </div>
+      <div class="wk-day-tabs" id="wk-tabs"></div>
+    </div>
+    <div class="chips-bar" id="wk-chips"></div>
+    <div id="wk-scroll"></div>
+  </div>
+
+  <!-- TULOSSA -->
+  <div class="view" id="tu-view">
+    <div id="tu-filter">
+      <div class="chip on" onclick="setTuF(null,this)">Kaikki</div>
+      <div class="chip" onclick="setTuF('iso',this)">🎪 Isot</div>
+      <div class="chip" onclick="setTuF('urheilu',this)">🏟️ Urheilu</div>
+      <div class="chip" onclick="setTuF('konsertti',this)">🎼 Konsertit</div>
+      <div class="chip" onclick="setTuF('keikka',this)">🎸 Keikat</div>
+      <div class="chip" onclick="setTuF('teatteri',this)">🎭 Teatteri</div>
+      <div class="chip" onclick="setTuF('taide',this)">🎨 Taide</div>
+      <div class="chip" onclick="setTuF('ruoka',this)">🍽️ Ruoka</div>
+    </div>
+    <div id="tu-scroll"></div>
+  </div>
+
+  <!-- KARTTA -->
+  <div class="view" id="map-view">
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="msearch">
+        <span>🔍</span>
+        <input type="search" placeholder="Hae tapahtumia…" oninput="mapSearch(this.value)">
+      </div>
+    </div>
+    <div id="map-sheet">
+      <div class="sh-handle"></div>
+      <div class="sh-title" id="sh-title">Tapahtumat</div>
+      <div id="map-list"></div>
+    </div>
+  </div>
+
+  <!-- HAKU -->
+  <div class="view" id="search-view">
+    <div id="s-top">
+      <input class="s-input" id="s-q" type="search" placeholder="Artisti, genre, paikka, joukkue…" oninput="renderSearch()">
+    </div>
+    <div class="chips-bar" id="s-chips"></div>
+    <div id="s-results"><div class="s-ph"><span class="em">🎸</span>Kirjoita hakusana tai valitse kategoria</div></div>
+  </div>
+
+</main>
+
+<nav id="nav">
+  <button class="nb on" onclick="sw('wk-view',this)"><span class="nb-icon">📅</span>Viikonloppu</button>
+  <button class="nb" onclick="sw('tu-view',this)"><span class="nb-icon">🗓️</span>Tulossa</button>
+  <button class="nb" onclick="sw('map-view',this)"><span class="nb-icon">🗺️</span>Kartta</button>
+  <button class="nb" onclick="sw('search-view',this)"><span class="nb-icon">🔍</span>Haku</button>
+</nav>
+
+<div id="m-ov" onclick="mOvClick(event)"><div id="modal"></div></div>
+
+<script>
+/* ─────────────────────────────────────────
+   GENRE COLOURS
+───────────────────────────────────────── */
+const GC={'indie rock':{bg:'#e0e7ff',c:'#4338ca'},'indie pop':{bg:'#fae8ff',c:'#9333ea'},'rock':{bg:'#fee2e2',c:'#dc2626'},'heavy metal':{bg:'#1f2937',c:'#f9fafb'},'doom metal':{bg:'#111827',c:'#d1d5db'},'punk':{bg:'#fff1f2',c:'#be123c'},'post-punk':{bg:'#f0fdf4',c:'#166534'},'new wave':{bg:'#eff6ff',c:'#1d4ed8'},'synthpop':{bg:'#f0f9ff',c:'#0284c7'},'electronic':{bg:'#ecfeff',c:'#0e7490'},'ambient':{bg:'#f1f5f9',c:'#475569'},'jazz':{bg:'#fffbeb',c:'#d97706'},'blues':{bg:'#ede9fe',c:'#7c3aed'},'soul':{bg:'#fff7ed',c:'#c2410c'},'funk':{bg:'#fef9c3',c:'#a16207'},'hip-hop':{bg:'#dbeafe',c:'#1d4ed8'},'rap':{bg:'#dbeafe',c:'#1e40af'},'r&b':{bg:'#fce7f3',c:'#9d174d'},'folk':{bg:'#dcfce7',c:'#15803d'},'acoustic':{bg:'#f0fdf4',c:'#166634'},'country':{bg:'#fef3c7',c:'#b45309'},'bluegrass':{bg:'#ecfdf5',c:'#047857'},'klassinen':{bg:'#f5f3ff',c:'#6d28d9'},'neoklassinen':{bg:'#faf5ff',c:'#7e22ce'},'pop':{bg:'#fdf2f8',c:'#a21caf'},'suomirock':{bg:'#fee2e2',c:'#b91c1c'},'suomipop':{bg:'#fce7f3',c:'#be185d'},'psykedeelinen':{bg:'#f5f3ff',c:'#7c3aed'},'progressiivinen':{bg:'#ecfeff',c:'#0891b2'},'post-rock':{bg:'#f8fafc',c:'#334155'},'shoegaze':{bg:'#fdf4ff',c:'#a855f7'},'garage rock':{bg:'#fff7ed',c:'#ea580c'},'stoner rock':{bg:'#fef3c7',c:'#92400e'},'jazz-fusion':{bg:'#fef9c3',c:'#854d0e'},'swing':{bg:'#fffbeb',c:'#b45309'}};
+function gs(g){return GC[g.toLowerCase()]||{bg:'#f1f5f9',c:'#475569'};}
+
+/* ─────────────────────────────────────────
+   CATEGORIES  (urheilu = kaikki urheilu)
+───────────────────────────────────────── */
+const CATS=[
+  {id:'keikka',   label:'Keikka',        icon:'🎸',color:'#E63946',bg:'#fde8ea'},
+  {id:'konsertti',label:'Konsertti',      icon:'🎼',color:'#2A9D8F',bg:'#d7f5f2'},
+  {id:'iso',      label:'Iso tapahtuma', icon:'🎪',color:'#F4A261',bg:'#fdf0e1'},
+  {id:'urheilu',  label:'Urheilu',        icon:'🏟️',color:'#1565C0',bg:'#dbeafe'},
+  {id:'teatteri', label:'Teatteri',       icon:'🎭',color:'#7B2D8B',bg:'#eedff5'},
+  {id:'elokuva',  label:'Elokuva',        icon:'🎬',color:'#546E7A',bg:'#eceff1'},
+  {id:'taide',    label:'Taide & Museo',  icon:'🎨',color:'#BF360C',bg:'#fbe9e7'},
+  {id:'ruoka',    label:'Ruoka & Tori',   icon:'🍽️',color:'#558B2F',bg:'#f1f8e9'},
+  {id:'lapset',   label:'Lapsiperheille', icon:'🧒',color:'#F77F00',bg:'#fff3e0'},
+];
+const catBy=id=>CATS.find(c=>c.id===id)||CATS[0];
+
+// Sport icons by type
+const SICONS={hockey:'🏒',basketball:'🏀',football:'⚽',volleyball:'🏐',other:'🏟️'};
+function sportIcon(e){return SICONS[e.sportType]||'🏟️';}
+
+/* ─────────────────────────────────────────
+   EVENTS
+   urheilu events: isSport:true, sportType:'hockey'|'basketball'|'football'
+───────────────────────────────────────── */
+const EVENTS=[
+  /* ─ TAMMIKUU ─ */
+  {id:1,name:'Tappara vs. Pelicans',sub:'Liiga — Tampere Areena',dates:'16.1.2026 klo 18:30',startDate:'2026-01-16',endDate:'2026-01-16',month:1,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Pelicans',league:'Liiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'18–49 €',url:'https://www.tappara.fi',desc:'Tampere Areenan jäällä kohtaavat Liiga-sarjassa Tappara ja Pelicans. 15 000 katsojan areena täynnä tunnelmaa.'},
+  {id:2,name:'Ilves vs. HIFK',sub:'Liiga — Nokia Areena',dates:'17.1.2026 klo 17:00',startDate:'2026-01-17',endDate:'2026-01-17',month:1,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Ilves',team2:'HIFK',league:'Liiga',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'16–45 €',url:'https://www.ilves.com',desc:'Jääkiekon Liiga: Ilves isännöi HIFK:ta Nokia Areenalla.'},
+  {id:3,name:'Pimeä Vesi',sub:'Telakka',dates:'16.1.2026 klo 21:00',startDate:'2026-01-16',endDate:'2026-01-16',month:1,cat:'keikka',location:'Telakka',address:'Tullikamarin aukio 3',lat:61.5018,lng:23.7698,price:'8 €',url:'https://www.telakka.eu',genres:['post-rock','ambient','shoegaze'],soundsLike:'Instrumentaalinen post-rock ilman sanoja — laajat maisemamaiset soundskaapet rakentuvat hiljaisuudesta kohti valtavia huippukohtia. Kuin Sigur Rós tai Godspeed You! Black Emperor.',spotifyQ:'Pimeä Vesi band',youtubeQ:'Pimeä Vesi post-rock',desc:'Tamperelainen instrumentaalinen post-rock -trio.'},
+  {id:4,name:'Betonijungle',sub:'Klubi',dates:'17.1.2026 klo 22:00',startDate:'2026-01-17',endDate:'2026-01-17',month:1,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'12 €',url:'https://www.klubi.fi',genres:['hip-hop','rap'],soundsLike:'Tamperelaista kaupunkirapia — raskaat beatit ja paikalliset tarinat. Muistuttaa Teflon Brothersia tai Paperi T:tä.',spotifyQ:'Betonijungle tampere hip-hop',youtubeQ:'Betonijungle tampere rap',desc:'Tamperelainen hip-hop -kollektiivi livessä Klubilla.'},
+  {id:5,name:'Tampere Jazz Happening – Talviversio',sub:'3 iltaa täynnä jazzia',dates:'16.–18.1.2026',startDate:'2026-01-16',endDate:'2026-01-18',month:1,cat:'keikka',size:'big',genres:['jazz','jazz-fusion','swing'],soundsLike:'Vaihtelevaa — festivaalilla esiintyy laidasta laitaan modernista jazz-triosta swingiin. Joka ilta eri tunnelma.',spotifyQ:'Tampere Jazz Happening',youtubeQ:'Tampere Jazz Happening festival',location:'Pakkahuone',address:'Itsenäisyydenkatu 8',lat:61.5024,lng:23.7695,price:'15–35 €',url:'https://www.tamperejazz.fi',desc:'Talvikauden jazzfestivaali Pakkahuoneella.'},
+  {id:6,name:'Kylmä Aalto',sub:'Bar Olympia',dates:'18.1.2026 klo 21:30',startDate:'2026-01-18',endDate:'2026-01-18',month:1,cat:'keikka',location:'Bar Olympia',address:'Hämeenkatu 26',lat:61.4975,lng:23.7620,price:'5 €',url:'https://www.barolympia.fi',genres:['post-punk','new wave','synthpop'],soundsLike:'80-luvun new waven henkinen mutta nykyaikainen — syntetisaattorit ja melankoliaa. Kuin Joy Division tai The Cure suomalaisessa kellarissa.',spotifyQ:'Kylmä Aalto post-punk',youtubeQ:'Kylmä Aalto new wave tampere',desc:'Tamperelainen post-punk / new wave -kvartetti.'},
+  {id:7,name:'TBT vs. Helsinki Seagulls',sub:'Korisliiga — Nokia Areena',dates:'18.1.2026 klo 15:00',startDate:'2026-01-18',endDate:'2026-01-18',month:1,cat:'urheilu',isSport:true,sportType:'basketball',team1:'Tampereen Basket',team2:'Helsinki Seagulls',league:'Korisliiga',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'12–28 €',url:'https://www.tamperebasket.fi',desc:'Korisliigan kotipeli Nokia Areenalla.'},
+  {id:8,name:'Vapriikki – Teollisuuden tarinat',sub:'Pitkäaikainen näyttely',dates:'1.1.–30.6.2026',startDate:'2026-01-01',endDate:'2026-06-30',month:1,cat:'taide',location:'Museokeskus Vapriikki',address:'Alaverstaanraitti 5',lat:61.5006,lng:23.7785,price:'12 €',url:'https://vapriikki.fi',desc:'Näyttely Tampereen teollisesta historiasta – puuvillatehtaista nykypäivän teknologiayrityksiin.'},
+
+  /* ─ HELMIKUU ─ */
+  {id:9,name:'Rautahäkki',sub:'Klubi — release show',dates:'6.2.2026 klo 20:00',startDate:'2026-02-06',endDate:'2026-02-06',month:2,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'14 €',url:'https://www.klubi.fi',genres:['heavy metal','doom metal','stoner rock'],soundsLike:'Raskas, hidas ja mahtaileva — Rautahäkki soittaa metallia johon tartutaan kuin riippakiveen. Kuin Black Sabbath tai Electric Wizard suomalaisessa kellarissa.',spotifyQ:'Rautahäkki metal tampere',youtubeQ:'Rautahäkki heavy metal',desc:'Tamperelainen doom/heavy metal -yhtye julkaisee uuden albumin.'},
+  {id:10,name:'Sinapinkeltainen',sub:'Telakka — akustinen ilta',dates:'7.2.2026 klo 20:00',startDate:'2026-02-07',endDate:'2026-02-07',month:2,cat:'keikka',location:'Telakka',address:'Tullikamarin aukio 3',lat:61.5018,lng:23.7698,price:'7 €',url:'https://www.telakka.eu',genres:['indie pop','acoustic','folk'],soundsLike:'Pehmeä ja lämmin — akustinen kitara ja tarttuvia hook-kohtia. Muistuttaa Lauraa tai Astrid S:ää suomalaisella twistillä.',spotifyQ:'Sinapinkeltainen indie pop',youtubeQ:'Sinapinkeltainen acoustic folk',desc:'Tamperelainen yksilöartisti akustisella kokoonpanolla intiimissä Telakassa.'},
+  {id:11,name:'Tampere Asuntomessut -preview',sub:'Ennakkonäyttely, Tampere Expo',dates:'6.–8.2.2026',startDate:'2026-02-06',endDate:'2026-02-08',month:2,cat:'iso',size:'big',location:'Tampere Expo',address:'Ilmailunkatu 20',lat:61.5200,lng:23.8200,price:'14 €',url:'https://www.tampere.fi',desc:'Asumisen ja rakentamisen suurmessut. Satoja näytteilleasettajia ja sisustusideoita.'},
+  {id:12,name:'Tappara vs. Kärpät',sub:'Liiga — Tampere Areena',dates:'7.2.2026 klo 18:30',startDate:'2026-02-07',endDate:'2026-02-07',month:2,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Kärpät',league:'Liiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'18–55 €',url:'https://www.tappara.fi',desc:'Vuoden odotetuin kotiottelu – Tappara vastaan Kärpät.'},
+  {id:13,name:'Neonvalot',sub:'Uusi Apteekki — dance night',dates:'14.2.2026 klo 21:00',startDate:'2026-02-14',endDate:'2026-02-14',month:2,cat:'keikka',location:'Uusi Apteekki',address:'Rautatienkatu 8',lat:61.4982,lng:23.7651,price:'10 €',url:'https://www.uusiapteekki.fi',genres:['synthpop','electronic','new wave'],soundsLike:'Tanssittava syntetisaattorimusiikki — 80-lukulainen estetiikka mutta nykyaikainen tuotanto. Kuin Depeche Mode suomeksi laulettuna.',spotifyQ:'Neonvalot synthpop finland',youtubeQ:'Neonvalot electronic synthpop',desc:'Tamperelainen synthpop-duo. Ystävänpäivän keikka.'},
+  {id:14,name:'Sara Hildén – Abstraktio nyt',sub:'Kansainvälinen näyttely',dates:'1.2.–30.4.2026',startDate:'2026-02-01',endDate:'2026-04-30',month:2,cat:'taide',location:'Sara Hildénin taidemuseo',address:'Laiturikatu 13',lat:61.5100,lng:23.7940,price:'14 €',url:'https://www.tampere.fi/sarahilden',desc:'Kansainvälinen abstraktin taiteen näyttely — 15 maasta teoksia.'},
+
+  /* ─ MAALISKUU ─ */
+  {id:15,name:'Tampere Film Festival',sub:'Pohjoismaiden johtava lyhytelokuvafestivaali',dates:'4.–8.3.2026',startDate:'2026-03-04',endDate:'2026-03-08',month:3,cat:'elokuva',size:'big',location:'Plevna & Niagara',address:'Itsenäisyydenkatu 2–10',lat:61.5030,lng:23.7680,price:'8–50 €',url:'https://tamperefilmfestival.fi',desc:'Yli 1000 elokuvaa yli 70 maasta. Workshop-ohjelmaa viiden päivän ajan.'},
+  {id:16,name:'Tuulenpesä',sub:'Klubi — progressiivista rockia',dates:'6.3.2026 klo 20:30',startDate:'2026-03-06',endDate:'2026-03-06',month:3,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'12 €',url:'https://www.klubi.fi',genres:['progressiivinen','rock','psykedeelinen'],soundsLike:'Monimutkainen, kokeileva mutta melodinen — pitkiä instrumentaalijaksoja ja yllättäviä harmonioita. Muistuttaa King Crimsonia tai Hakea. Ei taustamusiikkia vaan musiikin kuuntelua.',spotifyQ:'Tuulenpesä progressive rock finland',youtubeQ:'Tuulenpesä prog rock tampere',desc:'Tamperelainen progressiivinen rockbändi.'},
+  {id:17,name:'Ilves vs. TPS',sub:'Liiga — Nokia Areena',dates:'6.3.2026 klo 18:30',startDate:'2026-03-06',endDate:'2026-03-06',month:3,cat:'urheilu',isSport:true,sportType:'hockey',team1:'Ilves',team2:'TPS',league:'Liiga',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'16–42 €',url:'https://www.ilves.com',desc:'Liiga-runkosarjaa Nokia Areenalla.'},
+  {id:18,name:'Virtanen & Kumppanit',sub:'Pakkahuone — jazz',dates:'7.3.2026 klo 20:00',startDate:'2026-03-07',endDate:'2026-03-07',month:3,cat:'keikka',location:'Pakkahuone',address:'Itsenäisyydenkatu 8',lat:61.5024,lng:23.7695,price:'15 €',url:'https://pakkahuone.fi',genres:['jazz','jazz-fusion','soul'],soundsLike:'Perinteinen kvartetti mutta rehvakas lähestymistapa. Muistuttaa EST:n tai Erik Truffaz\'n tunnelmaa. Ei taustaa vaan aktiivista jazz-improvisaatiota.',spotifyQ:'Virtanen jazz trio tampere',youtubeQ:'Virtanen kumppanit jazz',desc:'Tamperelainen jazzkvartetti Pakkahuoneen intiimissä klubisalissa.'},
+  {id:19,name:'Tampere kuplii – sarjakuvafestivaali',sub:'Kansainvälinen sarjakuvatapahtuma',dates:'20.–22.3.2026',startDate:'2026-03-20',endDate:'2026-03-22',month:3,cat:'iso',size:'big',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'12 €',url:'https://www.tampere.fi',desc:'Kansainvälinen sarjakuvafestivaali. Tekijätapaamisia, näyttelyitä ja piirtotyöpajoja.'},
+  {id:20,name:'Mustat Helmet',sub:'Olympia-kortteli — blues',dates:'21.3.2026 klo 21:00',startDate:'2026-03-21',endDate:'2026-03-21',month:3,cat:'keikka',location:'Olympia-kortteli',address:'Hämeenkatu 26',lat:61.4975,lng:23.7618,price:'10 €',url:'https://olympia-kortteli.fi',genres:['blues','soul','garage rock'],soundsLike:'Rosoinen, energinen blues-rock — kitara ei anna periksi. Kuin Gary Clark Jr. tai The Black Keys suomalaisessa kellarissa. Suoraan naamaan.',spotifyQ:'Mustat Helmet blues rock finland',youtubeQ:'Mustat Helmet blues tampere',desc:'Tamperelainen blues-rock -trio.'},
+
+  /* ─ HUHTIKUU ─ */
+  {id:21,name:'Tampereen Sävel – kevätkonserttisarja',sub:'10 konserttia, 10 päivässä',dates:'3.–12.4.2026',startDate:'2026-04-03',endDate:'2026-04-12',month:4,cat:'konsertti',size:'big',genres:['klassinen','neoklassinen','jazz'],soundsLike:'Vaihteleva ohjelma — arkipäivisin orkesterimusiikkia, viikonloppuisin solisteja. Kattaa klassisesta moderniin.',spotifyQ:'Tampere Filharmonikot',youtubeQ:'Tampere Filharmonikot konsertti',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'20–60 €',url:'https://www.tampere-talo.fi',desc:'Tampereen Filharmonikot ja vierailevat solistit. 10 konserttia peräkkäisinä päivinä.'},
+  {id:22,name:'Liigan pudotuspelit – Tappara',sub:'Playoff — Tampere Areena',dates:'3.–20.4.2026',startDate:'2026-04-03',endDate:'2026-04-20',month:4,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Vastustaja TBD',league:'Liiga Playoffs',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'22–65 €',url:'https://www.tappara.fi',desc:'Liigan pudotuspelit alkavat. Play-off-kiekko on aivan eri juttu.'},
+  {id:23,name:'Lastenkulttuuriviikko',sub:'Ilmainen koko perheelle',dates:'13.–19.4.2026',startDate:'2026-04-13',endDate:'2026-04-19',month:4,cat:'lapset',location:'Eri paikat',address:'Tampere',lat:61.4978,lng:23.7609,price:'Ilmainen',url:'https://www.tampere.fi',desc:'Viikko täynnä teatteriesityksiä, työpajoja ja konsertteja lapsille.'},
+  {id:24,name:'Kevät & Kaamos',sub:'Bar Loose — folk-duo',dates:'11.4.2026 klo 20:00',startDate:'2026-04-11',endDate:'2026-04-11',month:4,cat:'keikka',location:'Bar Loose',address:'Hämeenpuisto 16',lat:61.4992,lng:23.7568,price:'8 €',url:'https://www.barloose.fi',genres:['folk','acoustic','bluegrass'],soundsLike:'Kaksi ääntä, kaksi kitaraa — suomalainen folk joka tuntuu tutulta mutta ei kliseiseltä. Muistuttaa Fleet Foxesia tai Iron & Winea mutta laulut suomeksi.',spotifyQ:'Kevät Kaamos folk duo finland',youtubeQ:'Kevät Kaamos acoustic folk',desc:'Tamperelainen akustinen folk-duo Bar Loosessa.'},
+  {id:25,name:'Pispala Spring – ulkoilmakonsertti',sub:'Ilmainen, Pispalan harjulla',dates:'18.4.2026',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Pispalan Torni',address:'Pispala',lat:61.5080,lng:23.7220,price:'Ilmainen',url:'https://www.tampere.fi',genres:['indie rock','folk','suomirock'],soundsLike:'Ulkoilmafeeling ja paikallisia bändejä eri genreistä. Joka vuosi eri artisti — katso ohjelmasta tämän vuoden esiintyjät.',spotifyQ:'Pispala Spring tampere',youtubeQ:'Pispala keikka ulkoilma',desc:'Ilmainen ulkoilmakonsertti Pispalassa.'},
+
+  /* ─ TOUKOKUU ─ */
+  {id:26,name:'Blockfest 2026',sub:'Suomen suurin hiphop-festivaali',dates:'22.–23.5.2026',startDate:'2026-05-22',endDate:'2026-05-23',month:5,cat:'iso',size:'big',location:'Ratinanniemi',address:'Ratinanniemi',lat:61.4912,lng:23.7652,price:'69–119 €',url:'https://blockfest.fi',desc:'Suomen suurin hiphop-festivaali. Suomalaisia ja kansainvälisiä artisteja kahdella lavalla.'},
+  {id:27,name:'TBT – Korisliiga Playoffs',sub:'Pudotuspelit — Nokia Areena',dates:'2.–20.5.2026',startDate:'2026-05-02',endDate:'2026-05-20',month:5,cat:'urheilu',size:'big',isSport:true,sportType:'basketball',team1:'Tampereen Basket',team2:'Vastustaja TBD',league:'Korisliiga Playoffs',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'15–35 €',url:'https://www.tamperebasket.fi',desc:'Korisliigan pudotuspelit käynnissä.'},
+  {id:28,name:'Lauantaitorit',sub:'Joka lauantai toukokuusta syyskuuhun',dates:'2.5.–26.9.2026',startDate:'2026-05-02',endDate:'2026-09-26',month:5,cat:'ruoka',location:'Tampereen Kauppatori',address:'Kauppatori',lat:61.4975,lng:23.7612,price:'Ilmainen',url:'https://www.tampere.fi',desc:'Torilla joka lauantai paikallisia tuottajia, käsityöläisiä ja street food.'},
+  {id:29,name:'Neonvalot + Kylmä Aalto',sub:'Klubi — yhteiskeikka',dates:'23.5.2026 klo 21:00',startDate:'2026-05-23',endDate:'2026-05-23',month:5,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'13 €',url:'https://www.klubi.fi',genres:['synthpop','post-punk','electronic'],soundsLike:'Kahden synth-painotteisen bändin yhteiskeikka — Neonvalot tuo tanssittavuuden, Kylmä Aalto pimeän reunan. 80-luvun estetiikkaa nykytekniikalla.',spotifyQ:'Neonvalot synthpop finland',youtubeQ:'Neonvalot Kylmä Aalto keikka',desc:'Kaksi tamperelaista elektroniikkapainotteista bändiä samalla lavalla.'},
+
+  /* ─ KESÄKUU ─ */
+  {id:30,name:'Tammerfest 2026',sub:'Kaupunkifestivaali, useita lavoja',dates:'11.–14.6.2026',startDate:'2026-06-11',endDate:'2026-06-14',month:6,cat:'iso',size:'big',location:'Hämeenpuisto',address:'Hämeenpuisto',lat:61.5000,lng:23.7567,price:'35–95 €',url:'https://tammerfest.fi',desc:'Tampereen sydämessä neljä päivää musiikkia, taidetta ja kaupunkikulttuuria.'},
+  {id:31,name:'Street Food Festival',sub:'50+ ruokakojua, Ratinanniemi',dates:'12.–14.6.2026',startDate:'2026-06-12',endDate:'2026-06-14',month:6,cat:'ruoka',size:'big',location:'Ratinanniemi',address:'Ratinanniemi',lat:61.4912,lng:23.7652,price:'Ilmainen sisäänpääsy',url:'https://www.tampere.fi',desc:'Yli 50 ruokakojua ympäri maailmaa.'},
+  {id:32,name:'Tampereen Yötön Yö',sub:'Ilmainen juhannus, Laukontori',dates:'20.–21.6.2026',startDate:'2026-06-20',endDate:'2026-06-21',month:6,cat:'keikka',size:'big',genres:['pop','suomipop','rock'],soundsLike:'Viikonlopun vapaa ohjelma torilla — eri artisteja läpi illan, genrejakauma laaja.',spotifyQ:'Tampereen Yötön Yö',youtubeQ:'Tampereen yötön yö keikka',location:'Laukontori',address:'Laukontori',lat:61.4960,lng:23.7680,price:'Ilmainen',url:'https://www.tampere.fi',desc:'Juhannuksen ilmaistapahtuma Laukontorilla.'},
+  {id:33,name:'Psyyke Collective',sub:'Telakka — psykedeelinen rock',dates:'13.6.2026 klo 21:00',startDate:'2026-06-13',endDate:'2026-06-13',month:6,cat:'keikka',location:'Telakka',address:'Tullikamarin aukio 3',lat:61.5018,lng:23.7698,price:'10 €',url:'https://www.telakka.eu',genres:['psykedeelinen','garage rock','stoner rock'],soundsLike:'Pitkiä jam-jaksoja, kitarat kiduttavat ja kiertävät — Tame Impalan tai Pond-tyylinen psykedeelinen seikkailu mutta raaempana.',spotifyQ:'Psyyke Collective psych rock finland',youtubeQ:'Psyyke Collective psychedelic rock',desc:'Tamperelainen psykedeelinen rockyhtyue Telakassa.'},
+  {id:34,name:'FC Tampere vs. IF Gnistan',sub:'Veikkausliiga',dates:'13.6.2026 klo 18:00',startDate:'2026-06-13',endDate:'2026-06-13',month:6,cat:'urheilu',isSport:true,sportType:'football',team1:'FC Tampere',team2:'IF Gnistan',league:'Veikkausliiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'10–28 €',url:'https://www.tampere.fi',desc:'Veikkausliigan kotipeli Tampere Areenalla.'},
+
+  /* ─ HEINÄKUU ─ */
+  {id:35,name:'Tammerfest 2026',sub:'Kaupunkifestivaali',dates:'9.–12.7.2026',startDate:'2026-07-09',endDate:'2026-07-12',month:7,cat:'iso',size:'big',location:'Hämeenpuisto',address:'Hämeenpuisto',lat:61.5000,lng:23.7567,price:'35–95 €',url:'https://tammerfest.fi',desc:'Tampereen sydämessä kaupunkifestivaalin tunnelma.'},
+  {id:36,name:'Pyynikin Kesäteatteri',sub:'Ulkoilmanäytelmä harjulla',dates:'1.7.–9.8.2026',startDate:'2026-07-01',endDate:'2026-08-09',month:7,cat:'teatteri',location:'Pyynikin Kesäteatteri',address:'Pyynikintori 2',lat:61.4979,lng:23.7311,price:'22–32 €',url:'https://www.pyynikinteatteriyhdistys.fi',desc:'Tunnelmallinen kesäteatteri Pyynikin harjulla.'},
+  {id:37,name:'Tampere Dance Festival',sub:'Kansainvälinen tanssin juhlafest',dates:'17.–21.7.2026',startDate:'2026-07-17',endDate:'2026-07-21',month:7,cat:'iso',size:'big',location:'Tampere-talo & Tuomiokirkonpuisto',address:'Tampere',lat:61.4990,lng:23.7740,price:'0–40 €',url:'https://www.tampere.fi',desc:'Katuteatterista balettiin — kansainvälinen tanssin juhla.'},
+  {id:38,name:'Lauantai-Jam Pakkahuoneella',sub:'Pakkahuone — avoin jams',dates:'11.7.2026 klo 21:00',startDate:'2026-07-11',endDate:'2026-07-11',month:7,cat:'keikka',location:'Pakkahuone',address:'Itsenäisyydenkatu 8',lat:61.5024,lng:23.7695,price:'5 €',url:'https://pakkahuone.fi',genres:['jazz','funk','blues'],soundsLike:'Spontaani jams-ilta — eri muusikot tulevat lavalle yhdessä. Funky, villi ja yllättävä. Joka ilta eri, ei koskaan tylsää.',spotifyQ:'Pakkahuone jazz jam tampere',youtubeQ:'Pakkahuone jam session',desc:'Viikoittainen jazz-jam session.'},
+  {id:39,name:'FC Tampere vs. KuPS',sub:'Veikkausliiga',dates:'18.7.2026 klo 17:00',startDate:'2026-07-18',endDate:'2026-07-18',month:7,cat:'urheilu',isSport:true,sportType:'football',team1:'FC Tampere',team2:'KuPS',league:'Veikkausliiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'10–25 €',url:'https://www.tampere.fi',desc:'Veikkausliigan kotipeli Tampere Areenalla.'},
+
+  /* ─ ELOKUU ─ */
+  {id:40,name:'Tampere Biennale 2026',sub:'Nykymusiikkifestivaali',dates:'7.–16.8.2026',startDate:'2026-08-07',endDate:'2026-08-16',month:8,cat:'konsertti',size:'big',genres:['klassinen','neoklassinen','ambient'],soundsLike:'Ei perinteistä klassista vaan uusia äänimaailmoja — odota yllätyksiä: elektroninen instrumentti tai hiljainen installaatiokonserttti.',spotifyQ:'Tampere Biennale nykymusikki',youtubeQ:'Tampere Biennale contemporary music',location:'Eri paikat',address:'Tampere',lat:61.5010,lng:23.7710,price:'8–25 €',url:'https://www.tampere.fi',desc:'Suomalaisten säveltäjien uusia teoksia ja kantaesityksiä.'},
+  {id:41,name:'Harmaa Myrsky',sub:'Klubi — post-punk / shoegaze',dates:'8.8.2026 klo 21:00',startDate:'2026-08-08',endDate:'2026-08-08',month:8,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'10 €',url:'https://www.klubi.fi',genres:['shoegaze','post-punk','indie rock'],soundsLike:'Kitarat hukkuvat kaikuun ja reverb:iin — melodiat kuuluvat silloin tällöin pilvisyyden läpi. My Bloody Valentine tai Slowdive -tyyliä suomalaisella nihilismillä.',spotifyQ:'Harmaa Myrsky shoegaze finland',youtubeQ:'Harmaa Myrsky post-punk',desc:'Tamperelainen shoegaze/post-punk -yhtye.'},
+  {id:42,name:'Näsijärvi Summer -konsertti',sub:'Ulkoilmakonsertti, Naistenlahti',dates:'14.–15.8.2026',startDate:'2026-08-14',endDate:'2026-08-15',month:8,cat:'keikka',size:'big',genres:['pop','suomipop','rock'],soundsLike:'Kesäfestivaalien loppuhuipentuma — suomalaisia ja kansainvälisiä artisteja. Tarkista lineup ennen ostoa.',spotifyQ:'Naistenlahti konsertti tampere',youtubeQ:'Tampere outdoor concert summer',location:'Näsijärven Ranta',address:'Naistenlahti',lat:61.5060,lng:23.7580,price:'45 €',url:'https://www.tampere.fi',desc:'Kesän viimeinen iso ulkoilmakonsertti Näsijärven rannalla.'},
+
+  /* ─ SYYSKUU ─ */
+  {id:43,name:'Tampere Jazz Happening',sub:'Yksi Suomen arvostetuimmista jazzfestareista',dates:'23.–27.9.2026',startDate:'2026-09-23',endDate:'2026-09-27',month:9,cat:'keikka',size:'big',genres:['jazz','jazz-fusion','swing'],soundsLike:'Kansainvälinen jazz-festivaali — viitenä päivänä nousee lavalle yhtyeitä Yhdysvalloista, Euroopasta ja Suomesta.',spotifyQ:'Tampere Jazz Happening',youtubeQ:'Tampere Jazz Happening festival concert',location:'Pakkahuone & Klubi',address:'Itsenäisyydenkatu 8',lat:61.5024,lng:23.7695,price:'20–55 €',url:'https://www.tamperejazz.fi',desc:'Kansainvälisiä tähtiä ja nuoria lahjakkuuksia viiden päivän ajan.'},
+  {id:44,name:'Tappara – kauden avaus',sub:'Liiga — Tampere Areena',dates:'12.9.2026 klo 18:30',startDate:'2026-09-12',endDate:'2026-09-12',month:9,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Lukko',league:'Liiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'18–49 €',url:'https://www.tappara.fi',desc:'Uusi Liiga-kausi alkaa!'},
+  {id:45,name:'Ilves – kauden avaus',sub:'Liiga — Nokia Areena',dates:'13.9.2026 klo 17:00',startDate:'2026-09-13',endDate:'2026-09-13',month:9,cat:'urheilu',isSport:true,sportType:'hockey',team1:'Ilves',team2:'Ässät',league:'Liiga',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'16–40 €',url:'https://www.ilves.com',desc:'Ilves avaa kotikautensa Nokia Areenalla.'},
+  {id:46,name:'Pirkanmaan Kirjamessut',sub:'Kirjallisuuden festivaali',dates:'11.–13.9.2026',startDate:'2026-09-11',endDate:'2026-09-13',month:9,cat:'iso',size:'big',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'8 €',url:'https://www.tampere.fi',desc:'Kirjallisuuden festivaali. Kirjailijavierailuja ja lasten satutunteja.'},
+  {id:47,name:'Kaksikko — acoustic pop',sub:'Bar Loose',dates:'12.9.2026 klo 20:00',startDate:'2026-09-12',endDate:'2026-09-12',month:9,cat:'keikka',location:'Bar Loose',address:'Hämeenpuisto 16',lat:61.4992,lng:23.7568,price:'8 €',url:'https://www.barloose.fi',genres:['indie pop','acoustic','folk'],soundsLike:'Kahden laulajan harmonia akustisen kitaran kanssa. Muistuttaa The Civil Warsia tai First Aid Kitia. Hyvä ilta ilman hypeä.',spotifyQ:'Kaksikko acoustic indie pop',youtubeQ:'Kaksikko acoustic pop tampere',desc:'Tamperelainen akustinen pop-duo.'},
+
+  /* ─ LOKAKUU ─ */
+  {id:48,name:'Tampereen Konemessut',sub:'Teollisuuden & teknologian suurmessut',dates:'6.–9.10.2026',startDate:'2026-10-06',endDate:'2026-10-09',month:10,cat:'iso',size:'big',location:'Tampere Expo',address:'Ilmailunkatu 20',lat:61.5200,lng:23.8200,price:'20 €',url:'https://www.tampere.fi',desc:'Pohjoismaiden suurimmat konemessut. Satoja näytteilleasettajia ja uutta teknologiaa.'},
+  {id:49,name:'Tappara vs. Ilves – DERBY!',sub:'Tampereen suurderby',dates:'10.10.2026 klo 18:30',startDate:'2026-10-10',endDate:'2026-10-10',month:10,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Ilves',league:'Liiga – Derby',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'25–70 €',url:'https://www.tappara.fi',desc:'TAMPERE DERBY! Kaupungin kuumin ottelu. Liput loppuvat nopeasti!'},
+  {id:50,name:'Halloween Vapriikki',sub:'Koko perheen peliseikkailu',dates:'30.–31.10.2026',startDate:'2026-10-30',endDate:'2026-10-31',month:10,cat:'lapset',location:'Museokeskus Vapriikki',address:'Alaverstaanraitti 5',lat:61.5006,lng:23.7785,price:'15 €',url:'https://vapriikki.fi',desc:'Koko perheen Halloween-tapahtuma museoympäristössä.'},
+  {id:51,name:'Rautahäkki + Tuulenpesä',sub:'Klubi — raskaan musiikin ilta',dates:'17.10.2026 klo 20:00',startDate:'2026-10-17',endDate:'2026-10-17',month:10,cat:'keikka',location:'Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'15 €',url:'https://www.klubi.fi',genres:['heavy metal','doom metal','progressiivinen'],soundsLike:'Yhteiskeikka: Rautahäkki tuo doomin ja Tuulenpesä proge-elementin. Pitkä ilta raskaan musiikin ystäville.',spotifyQ:'Rautahäkki Tuulenpesä metal rock',youtubeQ:'Rautahäkki Tuulenpesä keikka',desc:'Kahden tamperelaisen raskaan musiikin bändin yhteiskeikka.'},
+  {id:52,name:'Tampereen Filharmonikot – Syyskausi',sub:'Konserttisarja, Tampere-talo',dates:'2.10.–20.12.2026',startDate:'2026-10-02',endDate:'2026-12-20',month:10,cat:'konsertti',genres:['klassinen','neoklassinen'],soundsLike:'Tampere-talon maailmanluokan akustiikalla — kauden ohjelma kattaa Beethovenista nykymusiikkiin.',spotifyQ:'Tampere Filharmonikot',youtubeQ:'Tampereen Filharmonikot konsertti',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'18–55 €',url:'https://www.tamperefilharmonikot.fi',desc:'Filharmonikkojen syyskausi.'},
+
+  /* ─ MARRASKUU ─ */
+  {id:53,name:'Tampere Valot – Valoinstallaatiot',sub:'Ilmainen, Hämeenkatu',dates:'20.11.–6.12.2026',startDate:'2026-11-20',endDate:'2026-12-06',month:11,cat:'iso',size:'big',location:'Hämeenkatu',address:'Hämeenkatu, Tampere',lat:61.4978,lng:23.7609,price:'Ilmainen',url:'https://www.tampere.fi',desc:'Kaupunkia valaisevat taideteokset pimeimpään aikaan.'},
+  {id:54,name:'Tappara vs. Lukko',sub:'Liiga — Tampere Areena',dates:'7.11.2026 klo 18:30',startDate:'2026-11-07',endDate:'2026-11-07',month:11,cat:'urheilu',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Lukko',league:'Liiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'18–49 €',url:'https://www.tappara.fi',desc:'Liigan runkosarjaa Tampere Areenalla.'},
+  {id:55,name:'Joulumyyjäiset & Käsityömarkkinat',sub:'Perinteinen joulumarkkinat',dates:'27.11.–20.12.2026',startDate:'2026-11-27',endDate:'2026-12-20',month:11,cat:'ruoka',size:'big',location:'Tampereen Kauppatori',address:'Kauppatori',lat:61.4975,lng:23.7612,price:'Ilmainen',url:'https://www.tampere.fi',desc:'Jouluherkkuja, glögiä ja käsityöläisten töitä.'},
+  {id:56,name:'Sinapinkeltainen – syysjulkaisu',sub:'Pakkahuone — uusi EP',dates:'21.11.2026 klo 20:00',startDate:'2026-11-21',endDate:'2026-11-21',month:11,cat:'keikka',location:'Pakkahuone',address:'Itsenäisyydenkatu 8',lat:61.5024,lng:23.7695,price:'10 €',url:'https://pakkahuone.fi',genres:['indie pop','acoustic','soul'],soundsLike:'Kasvava tamperelainen artisti joka on löytänyt oman äänensä: lämmin, melodinen ja herkästi koskettava.',spotifyQ:'Sinapinkeltainen indie pop',youtubeQ:'Sinapinkeltainen acoustic soul',desc:'Sinapinkeltainen julkaisee uuden EP:n ja juhlistaa sitä Pakkahuoneella.'},
+  {id:57,name:'TBT – Korisliigan kauden avaus',sub:'Nokia Areena',dates:'15.11.2026 klo 15:00',startDate:'2026-11-15',endDate:'2026-11-15',month:11,cat:'urheilu',isSport:true,sportType:'basketball',team1:'Tampereen Basket',team2:'BC Nokia',league:'Korisliiga',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'12–25 €',url:'https://www.tamperebasket.fi',desc:'Korisliigan kotipeli Nokia Areenalla.'},
+
+  /* ─ JOULUKUU ─ */
+  {id:58,name:'Joulukonsertti – Tampere-talo',sub:'Filharmonikot',dates:'18.–22.12.2026',startDate:'2026-12-18',endDate:'2026-12-22',month:12,cat:'konsertti',size:'big',genres:['klassinen','neoklassinen'],soundsLike:'Jouluinen klassinen konsertti — tuttuja melodioita ja perinteistä tunnelmaa Tampere-talon akustiikalla.',spotifyQ:'Tampere joulukonsertti filharmonikot',youtubeQ:'Tampere joulukonsertti',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'22–65 €',url:'https://www.tampere-talo.fi',desc:'Filharmonikkojen joulukonsertti.'},
+  {id:59,name:'Tappara vs. Kärpät – Jouluottelu',sub:'Liiga — Tampere Areena',dates:'20.12.2026 klo 18:30',startDate:'2026-12-20',endDate:'2026-12-20',month:12,cat:'urheilu',size:'big',isSport:true,sportType:'hockey',team1:'Tappara',team2:'Kärpät',league:'Liiga',location:'Tampere Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'18–55 €',url:'https://www.tappara.fi',desc:'Joulun herkullisin ottelu – Tappara vs. Kärpät ennen joulua.'},
+  {id:60,name:'Uudenvuodenaatto – Gaala 2026',sub:'Tampere-talo + ilotulitus',dates:'31.12.2026',startDate:'2026-12-31',endDate:'2026-12-31',month:12,cat:'iso',size:'big',location:'Tampere-talo & Pyynikki',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'45–80 €',url:'https://www.tampere-talo.fi',desc:'Tampereen vuoden suurin ilta. Gaalatunnelma ja ilotulitus Pyynikin laelta.'},
+
+  /* ── meteli.net: LA 18.4.2026 ── */
+  {id:61,name:'Haloo Helsinki!',sub:'Nokia Areena',dates:'18.4.2026 klo 19:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',size:'big',location:'Nokia Areena',address:'Kansikatu 3',lat:61.5044,lng:23.7760,price:'59,90–99,90 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['indie pop','suomirock','pop'],soundsLike:'Suomen rakastetuimpia bändejä — tarttuvia melodioita suomeksi, isoilla tuotannoilla. Nokia Areena -konsertti on iso juttu.',spotifyQ:'Haloo Helsinki',youtubeQ:'Haloo Helsinki keikka Nokia Areena',desc:'Haloo Helsinki! Nokia Areenalla. Yksi vuoden isoimpia keikkoja Tampereella.'},
+  {id:62,name:"Screamin' Rancheros",sub:'Asemamestari — ilmainen',dates:'18.4.2026',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Asemamestari',address:'Itsenäisyydenkatu 2',lat:61.4990,lng:23.7660,price:'Ilmainen',url:'https://www.meteli.net/kaupunki/tampere',genres:['rockabilly','garage rock','blues'],soundsLike:"Vauhdikasta rockabillyä ja garage-rockia — retro-vibe ja energinen lavaesiintyminen. Kuin 50-luvun rock'n'roll tuli takaisin. Pääsymaksuton.",spotifyQ:'Screamin Rancheros rockabilly',youtubeQ:'Screamin Rancheros band',desc:'Rockabilly-keikka Asemamestarilla. Ilmainen sisäänpääsy.'},
+  {id:63,name:'Portion Boys + Komiat',sub:'Tavara-asema',dates:'18.4.2026 klo 20:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Tavara-asema',address:'Rautatienkatu 8',lat:61.4985,lng:23.7650,price:'39,50 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['punk','suomirock','rock'],soundsLike:'Portion Boys on Suomen rakastetuimpia punk-yhtyeitä — vauhdikasta, hauskaa ja energistä. Komiat lämmittelee. Klassinen punkki-ilta.',spotifyQ:'Portion Boys punk',youtubeQ:'Portion Boys keikka',desc:'Portion Boys ja Komiat Tavara-asemalla.'},
+  {id:64,name:'Alchemy – Finnish Dire Straits Tribute',sub:'TTT-Klubi',dates:'18.4.2026 klo 20:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'TTT-Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'25 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['rock','blues rock'],soundsLike:'Dire Straitsin klassikot elävänä — Sultans of Swing, Money for Nothing. Jos tykkäät Knopflerista, tämä on sinulle.',spotifyQ:'Dire Straits Sultans of Swing',youtubeQ:'Alchemy Dire Straits tribute Finland',desc:'Suomalainen Dire Straits -tributebändi TTT-Klubilla.'},
+  {id:65,name:'Malla Vivolin + Ella Mettänen',sub:'Sara Hildénin taidemuseo',dates:'18.4.2026 klo 15:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Sara Hildénin taidemuseo',address:'Laiturikatu 13',lat:61.5100,lng:23.7940,price:'18 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['folk','acoustic','jazz'],soundsLike:'Museokonsertit ovat omanlaisiaan — taiteen ympäröimänä intiimissä salissa. Malla Vivolin on tunnetttu folk-artisti.',spotifyQ:'Malla Vivolin folk',youtubeQ:'Malla Vivolin Ella Mettänen',desc:'Konsertti Sara Hildénin taidemuseossa.'},
+  {id:66,name:'Avanti! Kamariorkesteri — Sirja Nironen',sub:'Raatihuone',dates:'18.4.2026 klo 16:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'konsertti',location:'Raatihuone',address:'Aleksis Kiven katu 14–16',lat:61.4992,lng:23.7605,price:'25 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['klassinen','neoklassinen'],soundsLike:'Kamariorkesterikonsertti on intiimi kokemus. Avanti! on yksi Suomen arvostetuimmista kamarimusiikkiyhtyeistä.',spotifyQ:'Avanti Kamariorkesteri',youtubeQ:'Avanti Kamariorkesteri Sirja Nironen',desc:'Avanti! Kamariorkesteri ja solisti Sirja Nironen Raatihuoneella.'},
+  {id:67,name:'Maija Kauhanen & Saxtronauts',sub:'G Livelab Tampere',dates:'18.4.2026 klo 20:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'G Livelab Tampere',address:'Yliopistonkatu 55',lat:61.5027,lng:23.7782,price:'20 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['jazz','soul','funk'],soundsLike:'Saksofonivoittoinen jazz-soul — lämpimät sävyt ja groove. G Livelab on täydellinen paikka: intiimi ja laadukas akustiikka.',spotifyQ:'Maija Kauhanen Saxtronauts jazz',youtubeQ:'Maija Kauhanen Saxtronauts',desc:'Maija Kauhanen & Saxtronauts G Livelab Tampereella.'},
+  {id:68,name:'Secret Flowers',sub:'Tampere-talo',dates:'18.4.2026 klo 19:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Tampere-talo',address:'Yliopistonkatu 55',lat:61.5031,lng:23.7812,price:'35 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['pop','indie pop'],soundsLike:'Melodinen pop Tampere-talon hyvällä akustiikalla — hyvä lauluääni, hyvä sali.',spotifyQ:'Secret Flowers band',youtubeQ:'Secret Flowers concert',desc:'Secret Flowers -konsertti Tampere-talolla.'},
+  {id:69,name:'Hexjakt, Kaiser, Orbiter',sub:'Bar Kotelo',dates:'18.4.2026 klo 21:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Bar Kotelo',address:'Kuninkaankatu 10',lat:61.4968,lng:23.7588,price:'12–15 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['heavy metal','rock','punk'],soundsLike:'Kolme bändiä, yksi ilta kovaa musiikkia — Hexjakt tuo metallin, muut täydentävät. Pienen klubin intensiivinen metallikattaus.',spotifyQ:'Hexjakt metal tampere',youtubeQ:'Hexjakt Kaiser Orbiter',desc:'Kolmen bändin metallikeikka Bar Kotelossa.'},
+  {id:70,name:'Nina Kaitaranta + Julia Rautamaa',sub:'Vastavirta-klubi — ilmainen',dates:'18.4.2026 klo 20:00',startDate:'2026-04-18',endDate:'2026-04-18',month:4,cat:'keikka',location:'Vastavirta-klubi',address:'Sammonkatu 67',lat:61.5008,lng:23.7628,price:'Ilmainen',url:'https://www.meteli.net/kaupunki/tampere',genres:['folk','acoustic','indie pop'],soundsLike:'Kaksi artistia, akustinen tunnelma — folk-pop joka on haavoittuvainen ja tarttuva. Pieni klubi, läheinen kokemus. Ilmainen.',spotifyQ:'Nina Kaitaranta folk',youtubeQ:'Nina Kaitaranta Julia Rautamaa',desc:'Kahden artistin akustinen keikka Vastavirta-klubilla. Ilmainen sisäänpääsy.'},
+
+  /* ── meteli.net: SU 19.4.2026 ── */
+  {id:71,name:'Ilmiö Ensemble',sub:'Kulttuuritalo Laikku',dates:'19.4.2026 klo 14:00',startDate:'2026-04-19',endDate:'2026-04-19',month:4,cat:'konsertti',location:'Kulttuuritalo Laikku',address:'Tullikamarin aukio 2',lat:61.5015,lng:23.7695,price:'20 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['klassinen','neoklassinen','ambient'],soundsLike:'Moderni kamarikokoonpano joka ei pelkää kokeilla — klassisen koulutetut muusikot, uudet äänimaisema etusijalla.',spotifyQ:'Ilmiö Ensemble tampere',youtubeQ:'Ilmiö Ensemble',desc:'Ilmiö Ensemble Kulttuuritalo Laikussa.'},
+
+  /* ── meteli.net: PE 24.4.2026 ── */
+  {id:72,name:'Klamydia + Aino & Hajonneet',sub:'Tavara-asema',dates:'24.4.2026 klo 20:00',startDate:'2026-04-24',endDate:'2026-04-24',month:4,cat:'keikka',size:'big',location:'Tavara-asema',address:'Rautatienkatu 8',lat:61.4985,lng:23.7650,price:'29,50 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['punk','suomirock','rock'],soundsLike:'Klamydia on suomipunkin ehdoton klassikko — bändi jota koko Suomi laulaa mukana. Aino & Hajonneet lämmittelee.',spotifyQ:'Klamydia punk',youtubeQ:'Klamydia keikka',desc:'Klamydia ja Aino & Hajonneet Tavara-asemalla.'},
+  {id:73,name:'Sami Saari & Jazzpojat',sub:'TTT-Klubi',dates:'24.4.2026 klo 20:00',startDate:'2026-04-24',endDate:'2026-04-24',month:4,cat:'keikka',location:'TTT-Klubi',address:'Hämeenkatu 28',lat:61.4978,lng:23.7625,price:'28 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['jazz','swing','folk'],soundsLike:'Sami Saari on tunnetttu folk-jazz artisti — älykkäät lyriikat ja melodiat jäävät mieleen. Jazzpojat täydentää.',spotifyQ:'Sami Saari Jazzpojat',youtubeQ:'Sami Saari Jazzpojat keikka',desc:'Sami Saari & Jazzpojat TTT-Klubilla.'},
+  {id:74,name:'Ikinä + Awake Again',sub:'Bar Kotelo',dates:'24.4.2026 klo 21:00',startDate:'2026-04-24',endDate:'2026-04-24',month:4,cat:'keikka',location:'Bar Kotelo',address:'Kuninkaankatu 10',lat:61.4968,lng:23.7588,price:'16–19 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['rock','indie rock'],soundsLike:'Suomalaista rock-musiikkia — tarttuva, energinen ja rehellinen. Pienen klubin fiilis parhaimmillaan.',spotifyQ:'Ikinä rock finland',youtubeQ:'Ikinä Awake Again keikka',desc:'Ikinä ja Awake Again Bar Kotelossa.'},
+  {id:75,name:'Lust For Lily + Traitors Among Us',sub:'Varjobaari',dates:'24.4.2026 klo 21:00',startDate:'2026-04-24',endDate:'2026-04-24',month:4,cat:'keikka',location:'Varjobaari',address:'Hämeenpuisto 23',lat:61.4985,lng:23.7558,price:'10 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['rock','indie rock','garage rock'],soundsLike:'Kaksi bändiä rockin ytimessä — reipas meininki. Varjobaari on pieni klubi jossa etäisyys esiintyjiin on minimaalinen.',spotifyQ:'Lust For Lily rock',youtubeQ:'Lust For Lily band',desc:'Kahden bändin keikka Varjobaarissa.'},
+  {id:76,name:'Aggressive + The Hostile Ones',sub:'Vastavirta-klubi',dates:'24.4.2026 klo 20:00',startDate:'2026-04-24',endDate:'2026-04-24',month:4,cat:'keikka',location:'Vastavirta-klubi',address:'Sammonkatu 67',lat:61.5008,lng:23.7628,price:'15 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['heavy metal','punk','hardcore'],soundsLike:'Raskas, nopea ja intensiivinen — metallia ja hardcorea yhdistävät bändit. Vastavirta on Tampereen paras vaihtoehtoklubi.',spotifyQ:'Aggressive hardcore metal tampere',youtubeQ:'Aggressive The Hostile Ones',desc:'Raskaan musiikin keikka Vastavirta-klubilla.'},
+
+  /* ── meteli.net: LA 25.4.2026 ── */
+  {id:77,name:'The Aristocrats',sub:'Olympia — ei pidä missata',dates:'25.4.2026 klo 20:00',startDate:'2026-04-25',endDate:'2026-04-25',month:4,cat:'keikka',size:'big',location:'Olympia',address:'Hämeenkatu 26',lat:61.4975,lng:23.7618,price:'48 €',url:'https://www.meteli.net/kaupunki/tampere',genres:['progressiivinen','jazz-fusion','rock'],soundsLike:'Maailman teknisimpiä rokkaajia — Guthrie Govan, Bryan Beller ja Marco Minnemann leikkivät musiikilla kuin muut hengittävät. Harvoin Suomessa — ei pidä missata.',spotifyQ:'The Aristocrats band progressive',youtubeQ:'The Aristocrats live concert',desc:'The Aristocrats Olympiassa. Kansainvälinen instrumentaali-superbändi.'},
+];
+
+/* ─────────────────────────────────────────
+   HELPERS
+───────────────────────────────────────── */
+function addD(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+function isoDate(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function fmtShort(d){return`${d.getDate()}.${d.getMonth()+1}.`;}
+function isFree(p){return p.toLowerCase().includes('ilmainen')||p.toLowerCase().includes('free');}
+function eventsOnDay(day){const s=isoDate(day);return EVENTS.filter(e=>e.startDate<=s&&e.endDate>=s);}
+function genrePills(genres,small){
+  if(!genres||!genres.length)return'';
+  return genres.map(g=>{const s=gs(g);return`<span class="g-pill"style="background:${s.bg};color:${s.c};font-size:${small?'9.5px':'10.5px'}">${g}</span>`;}).join('');
+}
+
+/* ─────────────────────────────────────────
+   WEEKEND (current)
+───────────────────────────────────────── */
+function getCurrentWeekend(){
+  const now=new Date(), d=now.getDay();
+  let fri;
+  if(d===5)fri=new Date(now);
+  else if(d===6)fri=addD(now,-1);
+  else if(d===0)fri=addD(now,-2);
+  else fri=addD(now,5-d);
+  return{fri,sat:addD(fri,1),sun:addD(fri,2)};
+}
+const CWK=getCurrentWeekend();
+let wkDay='sat', wkCatF=null;
+
+function renderWeekend(){
+  document.getElementById('wk-range').textContent=`${fmtShort(CWK.fri)}–${fmtShort(CWK.sun)}`;
+  const days=[{k:'fri',l:'Pe',d:CWK.fri},{k:'sat',l:'La',d:CWK.sat},{k:'sun',l:'Su',d:CWK.sun}];
+  document.getElementById('wk-tabs').innerHTML=days.map(({k,l,d})=>{
+    const cnt=eventsOnDay(d).length;
+    return`<button class="wk-tab${wkDay===k?' on':''}"onclick="setWkDay('${k}')">
+      ${l} ${d.getDate()}.${d.getMonth()+1}.<br><span class="tab-cnt">${cnt}</span>
+    </button>`;
+  }).join('');
+  const dayEvts=eventsOnDay(wkDay==='fri'?CWK.fri:wkDay==='sat'?CWK.sat:CWK.sun);
+  const usedCats=[...new Set(dayEvts.map(e=>e.cat))];
+  document.getElementById('wk-chips').innerHTML=
+    CATS.filter(c=>usedCats.includes(c.id)).map(c=>
+      `<div class="chip${wkCatF===c.id?' on':''}"onclick="toggleWkCat('${c.id}')">${c.icon} ${c.label}</div>`
+    ).join('');
+  renderWkList();
+}
+function setWkDay(k){wkDay=k;wkCatF=null;renderWeekend();}
+function toggleWkCat(id){wkCatF=wkCatF===id?null:id;renderWeekend();}
+function renderWkList(){
+  const day=wkDay==='fri'?CWK.fri:wkDay==='sat'?CWK.sat:CWK.sun;
+  let evts=eventsOnDay(day);
+  if(wkCatF)evts=evts.filter(e=>e.cat===wkCatF);
+  if(!evts.length){document.getElementById('wk-scroll').innerHTML='<div class="no-evts">Ei tapahtumia tänä päivänä</div>';return;}
+  const big=evts.filter(e=>e.size==='big');
+  const sports=evts.filter(e=>e.isSport&&e.size!=='big');
+  const gigs=evts.filter(e=>e.cat==='keikka'&&!e.isSport&&e.size!=='big');
+  const other=evts.filter(e=>!e.isSport&&e.cat!=='keikka'&&e.size!=='big');
+  let h='';
+  if(big.length)h+='<div class="section-lbl">⭐ Isot tapahtumat</div>'+big.map(bigCard).join('');
+  if(sports.length)h+='<div class="section-lbl">🏟️ Urheilu</div>'+sports.map(sportCard).join('');
+  if(gigs.length)h+='<div class="section-lbl">🎸 Keikat & klubit</div>'+gigs.map(gigCard).join('');
+  if(other.length)h+='<div class="section-lbl">🎉 Muut</div>'+other.map(evCard).join('');
+  document.getElementById('wk-scroll').innerHTML=h;
+}
+
+/* ─────────────────────────────────────────
+   TULOSSA – upcoming weekends
+───────────────────────────────────────── */
+let tuF=null;
+
+function setTuF(cat,btn){
+  tuF=cat;
+  document.querySelectorAll('#tu-filter .chip').forEach(c=>c.classList.remove('on'));
+  btn.classList.add('on');
+  renderTulossa();
+}
+
+function getAllUpcomingWeekends(){
+  const today=new Date();
+  const end=new Date('2026-12-31');
+  // Start from the next upcoming Friday (skip current weekend — shown in viikonloppu tab)
+  let d=addD(CWK.fri,7);
+  const wks=[];
+  while(d<=end){
+    const fri=new Date(d), sat=addD(fri,1), sun=addD(fri,2);
+    // unique events across all 3 days
+    const seen=new Set();
+    const evts=[];
+    [fri,sat,sun].forEach(day=>{
+      eventsOnDay(day).forEach(e=>{if(!seen.has(e.id)){seen.add(e.id);evts.push({...e,_day:day});}});
+    });
+    wks.push({fri,sat,sun,evts});
+    d=addD(d,7);
+  }
+  return wks;
+}
+
+function renderTulossa(){
+  const wks=getAllUpcomingWeekends();
+  const mNames=['tammi','helmi','maalis','huhti','touko','kesä','heinä','elo','syys','loka','marras','joulu'];
+  let h='';
+  let shown=0;
+  wks.forEach((wk,i)=>{
+    let evts=wk.evts;
+    if(tuF)evts=evts.filter(e=>e.cat===tuF);
+    if(!evts.length)return;
+    shown++;
+    const friL=`${wk.fri.getDate()}.${wk.fri.getMonth()+1}.`;
+    const sunL=`${wk.sun.getDate()}.${wk.sun.getMonth()+1}.`;
+    const monthL=mNames[wk.fri.getMonth()];
+    // Sort: big first, then sports, then others
+    const sorted=[
+      ...evts.filter(e=>e.size==='big'),
+      ...evts.filter(e=>e.isSport&&e.size!=='big'),
+      ...evts.filter(e=>!e.isSport&&e.size!=='big'),
+    ];
+    h+=`<div class="wk-block"id="wkb${i}">
+      <div class="wk-block-hdr"onclick="toggleBlock(${i})">
+        <div class="wk-block-dates">Pe–Su ${friL}–${sunL} <span style="color:var(--muted);font-weight:500;font-size:12px">${monthL}kuuta</span></div>
+        <div class="wk-block-cnt">${sorted.length} tapahtumaa</div>
+        <div class="wk-block-toggle">›</div>
+      </div>
+      <div class="wk-block-body">${sorted.map(e=>tuRow(e,wk)).join('')}</div>
+    </div>`;
+  });
+  if(!shown)h='<div class="no-wk-block">Ei tulevia tapahtumia valitussa kategoriassa</div>';
+  document.getElementById('tu-scroll').innerHTML=h+'<div style="height:12px"></div>';
+}
+
+function toggleBlock(i){
+  const el=document.getElementById('wkb'+i);
+  el.classList.toggle('collapsed');
+}
+
+function tuRow(e,wk){
+  const c=catBy(e.cat);
+  const free=isFree(e.price);
+  const priceHtml=`<div class="tu-row-price${free?' free':''}">${free?'Ilm.':e.price}</div>`;
+
+  if(e.isSport){
+    return`<div class="tu-row"onclick="openModal(${e.id})">
+      <div class="tu-sport-icon">${sportIcon(e)}</div>
+      <div class="tu-row-left">
+        <div class="tu-row-name">${e.team1} vs ${e.team2}</div>
+        <div class="tu-row-meta"><span class="sc-league">${e.league}</span><span>📍 ${e.location}</span><span>${e.dates}</span></div>
+      </div>
+      ${priceHtml}
+      <div class="tu-arrow">›</div>
+    </div>`;
+  }
+  if(e.size==='big'){
+    return`<div class="tu-row"onclick="openModal(${e.id})">
+      <div class="tu-big-dot"style="background:${c.color}"></div>
+      <div class="tu-row-left">
+        <div class="tu-row-name">${e.name} <span class="tu-badge-big">ISO</span></div>
+        <div class="tu-row-meta"><span style="color:${c.color};font-weight:600">${c.icon} ${c.label}</span><span>📍 ${e.location}</span><span>${e.dates}</span></div>
+      </div>
+      ${priceHtml}
+      <div class="tu-arrow">›</div>
+    </div>`;
+  }
+  // gig row with genre pills
+  return`<div class="tu-row"onclick="openModal(${e.id})">
+    <div class="tu-dot"style="background:${c.color}"></div>
+    <div class="tu-row-left">
+      <div class="tu-row-name">${e.name}</div>
+      <div class="tu-row-meta">
+        <span>📍 ${e.location}</span><span>${e.dates}</span>
+      </div>
+      ${e.genres?`<div class="tu-genre-pills">${genrePills(e.genres,true)}</div>`:''}
+    </div>
+    ${priceHtml}
+    <div class="tu-arrow">›</div>
+  </div>`;
+}
+
+/* ─────────────────────────────────────────
+   CARD RENDERERS
+───────────────────────────────────────── */
+function bigCard(e){
+  const c=catBy(e.cat),free=isFree(e.price);
+  if(e.isSport)return`<div class="big-card"onclick="openModal(${e.id})">
+    <div class="bc-banner"style="background:linear-gradient(135deg,${c.color},${c.color}cc)">
+      <div class="bc-badge">${sportIcon(e)} ${e.league}</div>
+      <div class="bc-name">${e.team1} <span style="opacity:.7">vs</span> ${e.team2}</div>
+      <div class="bc-sub">${e.location}</div>
+    </div>
+    <div class="bc-foot"><div class="bc-meta"><strong>${e.dates}</strong><span>📍 ${e.location}</span></div>
+    <div class="bc-price"style="color:${c.color}">${free?'Ilmainen':e.price}</div><div class="bc-arrow">›</div></div>
+  </div>`;
+  return`<div class="big-card"onclick="openModal(${e.id})">
+    <div class="bc-banner"style="background:linear-gradient(135deg,${c.color},${c.color}bb)">
+      <div class="bc-badge">${c.icon} ${c.label}</div>
+      <div class="bc-name">${e.name}</div>${e.sub?`<div class="bc-sub">${e.sub}</div>`:''}
+    </div>
+    <div class="bc-foot"><div class="bc-meta"><strong>${e.dates}</strong><span>📍 ${e.location}</span></div>
+    <div class="bc-price"style="color:${c.color}">${free?'Ilmainen':e.price}</div><div class="bc-arrow">›</div></div>
+  </div>`;
+}
+function sportCard(e){
+  const c=catBy(e.cat),free=isFree(e.price);
+  return`<div class="sport-card"onclick="openModal(${e.id})">
+    <div class="sc-stripe"style="background:${c.color}"></div>
+    <div class="sc-body">
+      <div class="sc-icon">${sportIcon(e)}</div>
+      <div class="sc-info">
+        <div class="sc-teams">${e.team1} vs ${e.team2}</div>
+        <div class="sc-meta"><span>${e.dates}</span><span class="sc-league">${e.league}</span></div>
+        <div class="sc-meta"><span>📍 ${e.location}</span></div>
+      </div>
+      <div class="sc-price">${free?'Ilm.':e.price}</div>
+    </div>
+  </div>`;
+}
+function gigCard(e){
+  const free=isFree(e.price);
+  return`<div class="gig-card"onclick="openModal(${e.id})">
+    <div class="gc-body">
+      <div class="gc-top">
+        <div class="gc-left">
+          <div class="gc-name">${e.name}</div>
+          <div class="gc-sub"><span>📍 ${e.location}</span><span>📅 ${e.dates}</span></div>
+          ${e.genres?`<div class="genre-pills">${genrePills(e.genres)}</div>`:''}
+        </div>
+        <div class="gc-price ${free?'free':'paid'}">${free?'Ilmainen':e.price}</div>
+      </div>
+      ${e.soundsLike?`<div class="gc-soundslike">💬 ${e.soundsLike.slice(0,130)}${e.soundsLike.length>130?'…':''}</div>`:''}
+    </div>
+  </div>`;
+}
+function evCard(e){
+  const c=catBy(e.cat),free=isFree(e.price);
+  return`<div class="ev-card"onclick="openModal(${e.id})">
+    <div class="ev-left">
+      <div class="cat-badge"style="color:${c.color};background:${c.bg}">${c.icon} ${c.label}</div>
+      <div class="ev-name">${e.name}</div>
+      <div class="ev-meta"><span>📅 ${e.dates}</span><span>📍 ${e.location}</span></div>
+    </div>
+    <div class="price-tag ${free?'free':'paid'}">${free?'Ilmainen':e.price}</div>
+  </div>`;
+}
+function autoCard(e){
+  if(e.cat==='keikka'&&!e.isSport&&e.size!=='big')return gigCard(e);
+  if(e.isSport&&e.size==='big')return bigCard(e);
+  if(e.isSport)return sportCard(e);
+  if(e.size==='big')return bigCard(e);
+  return evCard(e);
+}
+
+/* ─────────────────────────────────────────
+   MAP
+───────────────────────────────────────── */
+let map,mLayer;
+function initMap(){
+  map=L.map('map',{zoomControl:false,attributionControl:false}).setView([61.4978,23.7610],13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
+  L.control.zoom({position:'bottomright'}).addTo(map);
+  mLayer=L.layerGroup().addTo(map);
+  renderMapMarkers('');
+}
+function mapSearch(q){renderMapMarkers(q);}
+function renderMapMarkers(q){
+  mLayer.clearLayers();
+  const lq=q.toLowerCase();
+  const evts=EVENTS.filter(e=>!lq||(e.name+e.location+(e.sub||'')+(e.team1||'')+(e.team2||'')).toLowerCase().includes(lq));
+  evts.forEach(e=>{
+    const c=catBy(e.cat);
+    const sz=e.size==='big'?26:20;
+    const icon=L.divIcon({html:`<div style="width:${sz}px;height:${sz}px;background:${c.color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid white;box-shadow:0 2px 8px rgba(0,0,0,.3)"></div>`,className:'',iconSize:[sz,sz],iconAnchor:[sz/2,sz]});
+    L.marker([e.lat,e.lng],{icon}).addTo(mLayer).on('click',()=>openModal(e.id));
+  });
+  document.getElementById('map-list').innerHTML=evts.slice(0,40).map(e=>{
+    const c=catBy(e.cat);
+    const nm=e.isSport?`${e.team1} vs ${e.team2}`:e.name;
+    return`<div class="map-ev"onclick="openModal(${e.id})">
+      <div class="map-dot"style="background:${c.color}"></div>
+      <div style="flex:1;min-width:0"><div class="map-ev-name">${nm}</div><div class="map-ev-sub">${e.location} · ${e.dates}</div></div>
+    </div>`;
+  }).join('');
+  document.getElementById('sh-title').textContent=`Tapahtumat (${evts.length})`;
+}
+
+/* ─────────────────────────────────────────
+   SEARCH
+───────────────────────────────────────── */
+let sCatF=null;
+function renderSChips(){
+  document.getElementById('s-chips').innerHTML=
+    CATS.map(c=>`<div class="chip${sCatF===c.id?' on':''}"onclick="toggleSCat('${c.id}')">${c.icon} ${c.label}</div>`).join('');
+}
+function toggleSCat(id){sCatF=sCatF===id?null:id;renderSearch();}
+function renderSearch(){
+  const q=document.getElementById('s-q').value.toLowerCase();
+  renderSChips();
+  if(!q&&!sCatF){document.getElementById('s-results').innerHTML='<div class="s-ph"><span class="em">🎸</span>Kirjoita artisti, genre tai paikka</div>';return;}
+  const evts=EVENTS.filter(e=>{
+    const blob=[e.name,e.location,e.sub||'',(e.genres||[]).join(' '),e.soundsLike||'',e.team1||'',e.team2||''].join(' ').toLowerCase();
+    return(!q||blob.includes(q))&&(!sCatF||e.cat===sCatF);
+  });
+  document.getElementById('s-results').innerHTML=evts.length?evts.map(autoCard).join(''):'<div class="s-ph"><span class="em">😕</span>Ei tuloksia</div>';
+}
+
+/* ─────────────────────────────────────────
+   MODAL
+───────────────────────────────────────── */
+function openModal(id){
+  const e=EVENTS.find(x=>x.id===id);if(!e)return;
+  const c=catBy(e.cat),free=isFree(e.price);
+  let h='<div class="m-handle"></div>';
+  if(e.isSport){
+    h+=`<div class="m-sport-hdr"style="background:linear-gradient(160deg,${c.color}22,transparent)">
+      <div style="display:inline-flex;align-items:center;gap:5px;background:${c.bg};color:${c.color};font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;padding:3px 8px;border-radius:20px;margin-bottom:8px">${sportIcon(e)} ${e.league}</div>
+      <div class="m-teams">
+        <div class="m-team"><div class="m-team-name">${e.team1}</div><div class="m-team-sub">Koti</div></div>
+        <div class="m-vs">VS</div>
+        <div class="m-team"><div class="m-team-name">${e.team2}</div><div class="m-team-sub">Vieras</div></div>
+      </div>
+    </div>
+    <div class="m-hdr" style="padding-top:8px">
+      <div class="m-title"><h2 style="font-size:16px;margin-top:0">${e.name||e.team1+' vs '+e.team2}</h2></div>
+      <button class="m-close2"onclick="closeModal()">✕</button>
+    </div>`;
+  } else if(e.size==='big'){
+    h+=`<div class="m-banner"style="background:linear-gradient(135deg,${c.color},${c.color}cc)">
+      <button class="m-close-b"onclick="closeModal()">✕</button>
+      <div class="m-banner-badge">${c.icon} ${c.label}</div>
+      <h2>${e.name}</h2>${e.sub?`<p>${e.sub}</p>`:''}
+    </div>`;
+  } else {
+    h+=`<div class="m-hdr"><div class="m-title">
+      <div class="cat-badge"style="color:${c.color};background:${c.bg}">${c.icon} ${c.label}</div>
+      <h2>${e.name}</h2>
+    </div><button class="m-close2"onclick="closeModal()">✕</button></div>`;
+  }
+  h+=`<div class="m-body">
+    <div class="m-row"><span class="m-icon">📅</span><div><div class="m-lbl">Ajankohta</div>${e.dates}</div></div>
+    <div class="m-row"><span class="m-icon">📍</span><div><div class="m-lbl">Paikka</div>${e.location}${e.address?', '+e.address:''}</div></div>
+    <div class="m-row"><span class="m-icon">🎟️</span><div><div class="m-lbl">Hinta</div>
+      <span style="font-weight:700;color:${free?'#059669':'var(--red)'}">${free?'Ilmainen':e.price}</span>
+    </div></div>`;
+  if(e.genres?.length||e.soundsLike){
+    h+=`<div class="m-genre-block">`;
+    if(e.genres?.length)h+=`<div class="m-lbl"style="margin-bottom:6px">Tyyli</div><div class="m-genre-row">${genrePills(e.genres)}</div>`;
+    if(e.soundsLike)h+=`<div class="m-sl">💬 ${e.soundsLike}</div>`;
+    if(e.spotifyQ||e.youtubeQ){
+      h+=`<div class="listen-btns">`;
+      if(e.spotifyQ)h+=`<a class="listen-btn sp"href="https://open.spotify.com/search/${encodeURIComponent(e.spotifyQ)}"target="_blank"rel="noopener">▶ Spotify</a>`;
+      if(e.youtubeQ)h+=`<a class="listen-btn yt"href="https://www.youtube.com/results?search_query=${encodeURIComponent(e.youtubeQ)}"target="_blank"rel="noopener">▶ YouTube</a>`;
+      h+=`</div>`;
+    }
+    h+=`</div>`;
+  }
+  h+=`<p class="m-desc">${e.desc}</p>
+    <a class="m-cta"href="${e.url}"target="_blank"rel="noopener">Lisätietoja & liput →</a>
+  </div>`;
+  document.getElementById('modal').innerHTML=h;
+  document.getElementById('m-ov').classList.add('on');
+}
+function mOvClick(ev){if(ev.target===document.getElementById('m-ov'))closeModal();}
+function closeModal(){document.getElementById('m-ov').classList.remove('on');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+/* ─────────────────────────────────────────
+   VIEW SWITCHING
+───────────────────────────────────────── */
+function sw(viewId,btn){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  document.getElementById(viewId).classList.add('on');
+  btn.classList.add('on');
+  if(viewId==='map-view')setTimeout(()=>map&&map.invalidateSize(),60);
+  if(viewId==='search-view'){renderSChips();renderSearch();}
+}
+
+/* ─────────────────────────────────────────
+   INIT
+───────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded',()=>{
+  renderWeekend();
+  renderTulossa();
+  renderSChips();
+  initMap();
+});
+</script>
+</body>
+</html>
