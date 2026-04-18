@@ -26,6 +26,15 @@ jobs:
       - name: Asenna riippuvuudet
         run: npm install
 
+      - name: Asenna Chromium-riippuvuudet
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            libgbm-dev libasound2 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libgdk-pixbuf2.0-0 libgtk-3-0 \
+            libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 \
+            libxkbcommon0 libxrandr2 xvfb
+
       - name: Aja scraper
         run: node scripts/scrape-meteli.js
 
@@ -39,8 +48,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          COUNT=$(grep -o '"_scraped":true' index.html | wc -l || echo "?")
           DATE=$(date +'%-d.%-m.%Y')
           git add index.html
-          git commit -m "auto: päivitä tapahtumat ${DATE} (meteli.net, ~${COUNT} kpl)"
+          git commit -m "auto: päivitä tapahtumat ${DATE} (meteli.net)"
           git push
