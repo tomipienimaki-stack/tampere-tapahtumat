@@ -97,12 +97,18 @@ async function scrape() {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
-    // Blokataan Gravito CMP (GDPR-evästepopup) ja Piano (paywall) —
-    // muuten sivu ei renderöi tapahtumia ennen käyttäjän hyväksyntää
+    // Kuuntele kaikki verkkokutsut — etsitään API-endpoint josta Alpine.js hakee datan
+    const apiCalls = [];
     await page.setRequestInterception(true);
     page.on('request', req => {
       const url = req.url();
-      if (url.includes('gravito') || url.includes('gravitocmp') || url.includes('piano.io')) {
+      // Kirjataan JSON/XHR-kutsut
+      const rt = req.resourceType();
+      if (rt === 'xhr' || rt === 'fetch' || url.includes('wp-json') || url.includes('/api/') || url.includes('?action=')) {
+        apiCalls.push({ url, type: rt });
+      }
+      // Blokataan vain Gravito
+      if (url.includes('gravito') || url.includes('gravitocmp')) {
         req.abort();
       } else {
         req.continue();
@@ -110,21 +116,25 @@ async function scrape() {
     });
 
     console.log(`Avataan: ${METELI_URL}`);
-    await page.goto(METELI_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(METELI_URL, { waitUntil: 'networkidle2', timeout: 45000 });
 
-    // Odota Alpine.js:n renderöimät article-elementit
+    // Tulostetaan kaikki API-kutsut
+    console.log('API-kutsut:', JSON.stringify(apiCalls.slice(0, 20), null, 2));
+
+    // Odota article-elementit
     try {
-      await page.waitForSelector('article', { timeout: 15000 });
+      await page.waitForSelector('article', { timeout: 10000 });
       console.log('article-elementit löytyivät');
     } catch {
-      console.log('article-elementtejä ei löytynyt — tulostetaan body-rakenne');
-      const info = await page.evaluate(() => ({
-        tags: Array.from(document.body.children)
-          .map(el => el.tagName + (el.id ? '#'+el.id : '') + (el.className ? '.'+[...el.classList].slice(0,2).join('.') : ''))
-          .join(', '),
-        text: document.body.innerText?.slice(0, 800) || '(tyhjä)',
-      }));
-      console.log('Body-lapset:', info.tags);
+      console.log('article-elementtejä ei löytynyt — tulostetaan #page sisältö');
+      const info = await page.evaluate(() => {
+        const page = document.querySelector('#page, main, .site-content, .content-area');
+        return {
+          html: page?.innerHTML?.slice(0, 2000) || document.body.innerHTML.slice(0, 2000),
+          text: document.body.innerText?.slice(0, 500) || '(tyhjä)',
+        };
+      });
+      console.log('Sisältö HTML:\n', info.html);
       console.log('Body-teksti:', info.text);
     }
 
