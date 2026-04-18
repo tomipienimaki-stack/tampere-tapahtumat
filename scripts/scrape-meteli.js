@@ -97,45 +97,51 @@ async function scrape() {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
-    // Kuuntele kaikki verkkokutsut — etsitään API-endpoint josta Alpine.js hakee datan
-    const apiCalls = [];
-    await page.setRequestInterception(true);
-    page.on('request', req => {
-      const url = req.url();
-      // Kirjataan JSON/XHR-kutsut
-      const rt = req.resourceType();
-      if (rt === 'xhr' || rt === 'fetch' || url.includes('wp-json') || url.includes('/api/') || url.includes('?action=')) {
-        apiCalls.push({ url, type: rt });
-      }
-      // Blokataan vain Gravito
-      if (url.includes('gravito') || url.includes('gravitocmp')) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
     console.log(`Avataan: ${METELI_URL}`);
     await page.goto(METELI_URL, { waitUntil: 'networkidle2', timeout: 45000 });
 
-    // Tulostetaan kaikki API-kutsut
-    console.log('API-kutsut:', JSON.stringify(apiCalls.slice(0, 20), null, 2));
-
-    // Odota article-elementit
+    // Yritä klikata Graviton "Hyväksy kaikki" -nappia (GDPR consent)
     try {
-      await page.waitForSelector('article', { timeout: 10000 });
+      await page.waitForSelector('#gravitoCMPRoot button, [class*="accept"], [id*="accept"]', { timeout: 8000 });
+      const clicked = await page.evaluate(() => {
+        // Etsi hyväksyntänappi tekstin perusteella
+        const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+        const acceptBtn = btns.find(b => {
+          const t = (b.innerText || b.textContent || '').toLowerCase();
+          return t.includes('hyväksy kaikki') || t.includes('accept all') || t.includes('salli kaikki') || t.includes('hyväksy');
+        });
+        if (acceptBtn) {
+          acceptBtn.click();
+          return acceptBtn.innerText;
+        }
+        return null;
+      });
+      if (clicked) {
+        console.log(`Klikattiin consent-nappi: "${clicked}"`);
+      } else {
+        console.log('Consent-nappia ei löytynyt tekstillä, yritetään klikata #gravitoCMPRoot ensimmäinen nappi');
+        await page.evaluate(() => {
+          const btn = document.querySelector('#gravitoCMPRoot button');
+          if (btn) btn.click();
+        });
+      }
+    } catch {
+      console.log('Gravito-popup ei ilmestynyt (tai ei ollut) — jatketaan');
+    }
+
+    // Odota article-elementit Graviton jälkeen
+    try {
+      await page.waitForSelector('article', { timeout: 15000 });
       console.log('article-elementit löytyivät');
     } catch {
-      console.log('article-elementtejä ei löytynyt — tulostetaan #page sisältö');
-      const info = await page.evaluate(() => {
-        const page = document.querySelector('#page, main, .site-content, .content-area');
-        return {
-          html: page?.innerHTML?.slice(0, 2000) || document.body.innerHTML.slice(0, 2000),
-          text: document.body.innerText?.slice(0, 500) || '(tyhjä)',
-        };
-      });
-      console.log('Sisältö HTML:\n', info.html);
-      console.log('Body-teksti:', info.text);
+      console.log('article-elementtejä ei löytynyt — debug:');
+      const info = await page.evaluate(() => ({
+        articleCount: document.querySelectorAll('article').length,
+        bodyText: document.body.innerText?.slice(0, 600) || '(tyhjä)',
+        gravito: !!document.querySelector('#gravitoCMPRoot'),
+      }));
+      console.log('article-määrä:', info.articleCount, '| Gravito läsnä:', info.gravito);
+      console.log('Body-teksti:', info.bodyText);
     }
 
     // Kuuntele browser-konsoliviestit debuggausta varten
