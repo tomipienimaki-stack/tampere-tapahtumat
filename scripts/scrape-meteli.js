@@ -98,15 +98,28 @@ async function scrape() {
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
     console.log(`Avataan: ${METELI_URL}`);
-    await page.goto(METELI_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(METELI_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Odotetaan että tapahtumat latautuvat
+    // Odota että JavaScript renderöi tapahtumat (article-elementit)
     try {
-      await page.waitForSelector('article, .event, .gig-item, .event-item, h2.entry-title', {
-        timeout: 10000,
-      });
+      await page.waitForSelector('article', { timeout: 15000 });
+      console.log('article-elementit löytyivät');
     } catch {
-      console.log('Selektori ei löytynyt ajoissa — jatketaan silti');
+      console.log('article-elementtejä ei löytynyt 15s sisällä — tulostetaan HTML');
+      // Debug: tulosta sivun HTML-rakenne
+      const snippet = await page.evaluate(() => {
+        const body = document.body;
+        // Ylätason elementtien tagit
+        const tags = Array.from(body.children).map(el => el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + [...el.classList].join('.') : '')).join(', ');
+        return {
+          tags,
+          bodyText: body.innerText?.slice(0, 1000) || '',
+          title: document.title,
+        };
+      });
+      console.log('Sivun otsikko:', snippet.title);
+      console.log('Body-lapset:', snippet.tags);
+      console.log('Body-teksti:\n', snippet.bodyText);
     }
 
     // Kuuntele browser-konsoliviestit debuggausta varten
