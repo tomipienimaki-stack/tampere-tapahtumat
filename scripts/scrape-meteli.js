@@ -7,7 +7,7 @@
  * CI:   GitHub Actions ajaa tämän viikoittain
  */
 
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -73,7 +73,15 @@ function fmtDates(dateStr, timeStr) {
 async function scrape() {
   console.log('Käynnistetään Puppeteer...');
 
+  // Käytetään järjestelmän Chromea (GitHub Actions -runnerilla on google-chrome-stable)
+  const executablePath =
+    process.env.CHROME_PATH ||
+    '/usr/bin/google-chrome-stable';
+
+  console.log(`Chrome: ${executablePath}`);
+
   const browser = await puppeteer.launch({
+    executablePath,
     headless: true,
     args: [
       '--no-sandbox',

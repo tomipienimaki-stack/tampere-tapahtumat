@@ -26,14 +26,11 @@ jobs:
       - name: Asenna riippuvuudet
         run: npm install
 
-      - name: Asenna Chromium-riippuvuudet
+      - name: Tarkista Chrome
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q \
-            libgbm-dev libasound2 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libgdk-pixbuf2.0-0 libgtk-3-0 \
-            libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 \
-            libxkbcommon0 libxrandr2 xvfb
+          CHROME=$(which google-chrome-stable 2>/dev/null || which chromium-browser 2>/dev/null || echo "ei löydy")
+          echo "Chrome: $CHROME"
+          echo "CHROME_PATH=$CHROME" >> $GITHUB_ENV
 
       - name: Aja scraper
         run: node scripts/scrape-meteli.js
