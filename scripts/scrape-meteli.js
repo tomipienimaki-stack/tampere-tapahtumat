@@ -1,22 +1,25 @@
 /**
  * scrape-meteli.js
- * Hakee tulevat keikat meteli.net/kaupunki/tampere -sivulta Puppeteerilla
- * (sivu renderöi tapahtumat JavaScriptillä, joten fetch ei riitä).
+ * Hakee tulevat keikat meteli.net/kaupunki/tampere -sivulta.
+ *
+ * Strategia 1: RSS-syöte (nopea, ei selainta)
+ * Strategia 2: Puppeteer (headless browser, jos RSS ei toimi)
  *
  * Ajo:  node scripts/scrape-meteli.js
  * CI:   GitHub Actions ajaa tämän viikoittain
  */
 
-import puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = path.join(__dirname, '..', 'index.html');
-const METELI_URL = 'https://www.meteli.net/kaupunki/tampere';
+const METELI_URL  = 'https://www.meteli.net/kaupunki/tampere';
+const METELI_RSS  = 'https://www.meteli.net/kaupunki/tampere/feed/';
 
-// ── Tunnetut tamperelaiset keikapaikat koordinaatteineen ──────────────────
+// ── Tunnetut keikapaikat ──────────────────────────────────────────────────
 const VENUES = {
   'klubi':           { address: 'Hämeenkatu 28',          lat: 61.4978, lng: 23.7625 },
   'telakka':         { address: 'Tullikamarin aukio 3',   lat: 61.5018, lng: 23.7698 },
@@ -33,12 +36,12 @@ const VENUES = {
   'plevna':          { address: 'Itsenäisyydenkatu 2',    lat: 61.5030, lng: 23.7680 },
   'bar olympia':     { address: 'Hämeenkatu 26',          lat: 61.4975, lng: 23.7618 },
   'yo-talo':         { address: 'Kalevantie 2',           lat: 61.5003, lng: 23.7736 },
+  'tavara-asema':    { address: 'Kuninkaankatu 16',       lat: 61.4980, lng: 23.7600 },
+  'asemamestari':    { address: 'Rautatienkatu 24',       lat: 61.4990, lng: 23.7650 },
+  'ttt-klubi':       { address: 'Hämeenpuisto 28',        lat: 61.4990, lng: 23.7570 },
   'pispala':         { address: 'Pispala',                lat: 61.5100, lng: 23.7250 },
 };
-
 const DEFAULT_LOC = { address: 'Tampere', lat: 61.4981, lng: 23.7608 };
-
-// ── Apufunktiot ───────────────────────────────────────────────────────────
 
 function venueInfo(raw) {
   if (!raw) return DEFAULT_LOC;
@@ -49,9 +52,17 @@ function venueInfo(raw) {
   return { ...DEFAULT_LOC, location: raw };
 }
 
-function parseDate(raw) {
+function parseISODate(raw) {
+  // RSS pubDate: "Sat, 18 Apr 2026 00:00:00 +0000"
   if (!raw) return null;
-  // Poista viikonpäivä ("pe ", "la ", "su " jne.)
+  const d = new Date(raw);
+  if (isNaN(d)) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function parseFiDate(raw) {
+  // Finnish format: "LA 18.04." tai "18.4.2026"
+  if (!raw) return null;
   const cleaned = raw.replace(/^(ma|ti|ke|to|pe|la|su)\s*/i, '').trim();
   const m = cleaned.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})?/);
   if (!m) return null;
@@ -64,267 +75,224 @@ function parseDate(raw) {
 function fmtDates(dateStr, timeStr) {
   if (!dateStr) return '';
   const [y, mo, d] = dateStr.split('-');
-  const time = timeStr ? ` klo ${timeStr}` : '';
-  return `${parseInt(d)}.${parseInt(mo)}.${y}${time}`;
+  return `${parseInt(d)}.${parseInt(mo)}.${y}${timeStr ? ' klo ' + timeStr : ''}`;
 }
 
-// ── Päälogiikka ───────────────────────────────────────────────────────────
+// ── Strategia 1: RSS ──────────────────────────────────────────────────────
+async function scrapeRSS() {
+  console.log('Kokeillaan RSS-syötettä:', METELI_RSS);
+  const res = await fetch(METELI_RSS, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TampereTapahtumat/1.0)' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
+  const xml = await res.text();
 
-async function scrape() {
-  console.log('Käynnistetään Puppeteer...');
+  // Parsitaan RSS XML yksinkertaisella regexillä (ei tarvita cheerio)
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => m[1]);
+  console.log(`RSS: ${items.length} artikkelia`);
 
-  // Käytetään järjestelmän Chromea (GitHub Actions -runnerilla on google-chrome-stable)
-  const executablePath =
-    process.env.CHROME_PATH ||
-    '/usr/bin/google-chrome-stable';
+  const results = [];
+  for (const item of items) {
+    const title   = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1]
+                 || item.match(/<title>(.*?)<\/title>/)?.[1] || '';
+    const link    = item.match(/<link>(.*?)<\/link>/)?.[1]
+                 || item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] || '';
+    const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || '';
+    const desc    = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1]
+                 || item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '';
 
-  console.log(`Chrome: ${executablePath}`);
+    if (!title.trim()) continue;
 
+    // Venue ja hinta ovat usein descriptionissa tai titlessa
+    // Esim: "Haloo Helsinki! @ Nokia-areena, Tampere – alk. 59,90 €"
+    const venueMatch = title.match(/@\s*([^–—]+?)(?:\s*[–—]|$)/) ||
+                       desc.match(/(?:venue|paikka|venue):\s*([^\n<]+)/i);
+    const priceMatch = desc.match(/alk[.\s]+(\d[\d,–\-\s]+€?)/i) ||
+                       title.match(/alk[.\s]+(\d[\d,–\-\s]+€?)/i);
+
+    const venueRaw = venueMatch?.[1]?.trim() || '';
+    const price    = priceMatch ? 'alk. ' + priceMatch[1].trim() : 'Tarkista sivulta';
+
+    // Päivämäärä pubDate:sta tai descriptionista
+    let dateStr = parseISODate(pubDate);
+    if (!dateStr) {
+      const fiDate = desc.match(/\d{1,2}\.\d{1,2}\.(?:\d{4})?/)?.[0];
+      dateStr = parseFiDate(fiDate || '');
+    }
+
+    const cleanTitle = title.replace(/@.*$/, '').trim() || title.trim();
+    results.push({ name: cleanTitle, venue: venueRaw, dateRaw: pubDate, timeRaw: '', price, url: link, dateStr });
+  }
+
+  return results;
+}
+
+// ── Strategia 2: Puppeteer ────────────────────────────────────────────────
+async function scrapePuppeteer() {
+  console.log('Käynnistetään Puppeteer (bundled Chromium)...');
   const browser = await puppeteer.launch({
-    executablePath,
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
   });
 
   let rawEvents = [];
-
   try {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
+    page.on('console', msg => { if (msg.text().startsWith('DBG:')) console.log('[b]', msg.text()); });
 
     console.log(`Avataan: ${METELI_URL}`);
     await page.goto(METELI_URL, { waitUntil: 'networkidle2', timeout: 45000 });
 
-    // Yritä klikata Graviton "Hyväksy kaikki" -nappia (GDPR consent)
+    // Yritä hyväksyä Gravito-consent
     try {
-      await page.waitForSelector('#gravitoCMPRoot button, [class*="accept"], [id*="accept"]', { timeout: 8000 });
-      const clicked = await page.evaluate(() => {
-        // Etsi hyväksyntänappi tekstin perusteella
+      await page.waitForSelector('#gravitoCMPRoot', { timeout: 6000 });
+      await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-        const acceptBtn = btns.find(b => {
-          const t = (b.innerText || b.textContent || '').toLowerCase();
-          return t.includes('hyväksy kaikki') || t.includes('accept all') || t.includes('salli kaikki') || t.includes('hyväksy');
-        });
-        if (acceptBtn) {
-          acceptBtn.click();
-          return acceptBtn.innerText;
-        }
-        return null;
+        const btn = btns.find(b => /hyväksy|accept|salli/i.test(b.textContent));
+        if (btn) { btn.click(); return btn.textContent.trim(); }
+        // Fallback: klikkaa #gravitoCMPRoot ensimmäinen nappi
+        document.querySelector('#gravitoCMPRoot button')?.click();
       });
-      if (clicked) {
-        console.log(`Klikattiin consent-nappi: "${clicked}"`);
-      } else {
-        console.log('Consent-nappia ei löytynyt tekstillä, yritetään klikata #gravitoCMPRoot ensimmäinen nappi');
-        await page.evaluate(() => {
-          const btn = document.querySelector('#gravitoCMPRoot button');
-          if (btn) btn.click();
-        });
-      }
+      await new Promise(r => setTimeout(r, 2000));
+      console.log('Consent-nappi klikattu, odotetaan renderöintiä...');
+      await page.waitForSelector('article', { timeout: 10000 });
     } catch {
-      console.log('Gravito-popup ei ilmestynyt (tai ei ollut) — jatketaan');
+      console.log('Consent ei ilmestynyt tai articles jo näkyvillä');
     }
 
-    // Odota article-elementit Graviton jälkeen
-    try {
-      await page.waitForSelector('article', { timeout: 15000 });
-      console.log('article-elementit löytyivät');
-    } catch {
-      console.log('article-elementtejä ei löytynyt — debug:');
-      const info = await page.evaluate(() => ({
-        articleCount: document.querySelectorAll('article').length,
-        bodyText: document.body.innerText?.slice(0, 600) || '(tyhjä)',
-        gravito: !!document.querySelector('#gravitoCMPRoot'),
-      }));
-      console.log('article-määrä:', info.articleCount, '| Gravito läsnä:', info.gravito);
-      console.log('Body-teksti:', info.bodyText);
-    }
+    const artCount = await page.evaluate(() => document.querySelectorAll('article').length);
+    console.log(`article-elementtejä: ${artCount}`);
 
-    // Kuuntele browser-konsoliviestit debuggausta varten
-    page.on('console', msg => {
-      if (msg.text().startsWith('DBG:')) console.log('[browser]', msg.text());
-    });
+    const SKIP = /^(löydä liput|osta liput|buy tickets|lisää tietoa)$/i;
+    const DAY  = /^(MA|TI|KE|TO|PE|LA|SU)$/i;
+    const DATE = /^\d{1,2}\.\d{1,2}\.?$/;
+    const TIME = /^\d{2}:\d{2}$/;
 
-    // Haetaan tapahtumadata suoraan sivun DOM:sta
-    rawEvents = await page.evaluate(() => {
+    rawEvents = await page.evaluate((skipRe, dayRe, dateRe, timeRe) => {
+      const SKIP = new RegExp(skipRe, 'i');
+      const DAY  = new RegExp(dayRe,  'i');
+      const DATE = new RegExp(dateRe);
+      const TIME = new RegExp(timeRe);
       const results = [];
-      const SKIP = /^(löydä liput|osta liput|buy tickets|lisää tietoa|lue lisää)$/i;
-      const DAY  = /^(MA|TI|KE|TO|PE|LA|SU)$/i;
-      // Hyväksy sekä "18.04." että "18.4." (1-2 numeroa kuukaudessa)
-      const DATE = /^\d{1,2}\.\d{1,2}\.?$/;
-      const TIME = /^\d{2}:\d{2}$/;
 
-      const articles = document.querySelectorAll('article');
+      const arts = document.querySelectorAll('article');
+      console.log('DBG: article-määrä=' + arts.length);
 
-      // Debug: loggaa ensimmäisen artiklan rivit
-      if (articles.length > 0) {
-        const firstLines = (articles[0].innerText || '')
-          .split('\n').map(l => l.trim()).filter(l => l.length > 0).slice(0, 10);
-        console.log('DBG: artikloita=' + articles.length + ' | ensimmäinen:', JSON.stringify(firstLines));
-      } else {
-        console.log('DBG: ei yhtään article-elementtiä');
-      }
-
-      articles.forEach(art => {
-        const lines = (art.innerText || '')
-          .split('\n')
-          .map(l => l.trim())
-          .filter(l => l.length > 0 && !SKIP.test(l));
-
-        if (lines.length < 3) return;
-
-        const dayIdx  = lines.findIndex(l => DAY.test(l));
+      arts.forEach(art => {
+        const lines = (art.innerText || '').split('\n').map(l => l.trim()).filter(l => l && !SKIP.test(l));
         const dateIdx = lines.findIndex(l => DATE.test(l));
         if (dateIdx === -1) return;
-
-        const afterDate = Math.max(dayIdx, dateIdx) + 1;
-        const name = lines[afterDate];
+        const dayIdx  = lines.findIndex(l => DAY.test(l));
+        const after   = Math.max(dayIdx, dateIdx) + 1;
+        const name    = lines[after];
         if (!name || name.length < 2) return;
-
-        const dateRaw = [
-          dayIdx >= 0 ? lines[dayIdx] : '',
-          lines[dateIdx],
-        ].filter(Boolean).join(' ');
-
-        const venuePriceLine = lines[afterDate + 1] || '';
-        let venue = '';
-        let price = '';
-        if (venuePriceLine.includes(' - alk. ')) {
-          const parts = venuePriceLine.split(' - alk. ');
-          venue = parts[0].split(',')[0].trim();
-          price = 'alk. ' + parts[1].trim();
-        } else {
-          venue = venuePriceLine.split(',')[0].trim();
-        }
-
-        const timeLine = lines.find(l => TIME.test(l)) || '';
-        const url = art.querySelector('a[href]')?.href || '';
-
-        results.push({ name, venue, dateRaw, timeRaw: timeLine, price, url });
+        const dateRaw = [dayIdx >= 0 ? lines[dayIdx] : '', lines[dateIdx]].filter(Boolean).join(' ');
+        const vp = lines[after + 1] || '';
+        let venue = '', price = '';
+        if (vp.includes(' - alk. ')) {
+          const p = vp.split(' - alk. ');
+          venue = p[0].split(',')[0].trim();
+          price = 'alk. ' + p[1].trim();
+        } else { venue = vp.split(',')[0].trim(); }
+        results.push({ name, venue, dateRaw, timeRaw: lines.find(l => TIME.test(l)) || '', price, url: art.querySelector('a[href]')?.href || '' });
       });
-
       return results;
-    });
+    },
+      SKIP.source, DAY.source, DATE.source, TIME.source
+    );
 
-    console.log(`DOM:sta löydettiin ${rawEvents.length} raakatapahtumaa`);
-
-    // Jos ei mitään, tulostetaan sivun teksti debuggausta varten
-    if (rawEvents.length === 0) {
-      const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 3000));
-      console.log('Sivun teksti (debug):\n', bodyText);
-    }
-
+    console.log(`Puppeteer: löydettiin ${rawEvents.length} raakatapahtumaa`);
   } finally {
     await browser.close();
   }
+  return rawEvents;
+}
 
-  // ── Suodatus ja muotoilu ──────────────────────────────────────────────
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() + 42); // 6 viikkoa eteenpäin
-
+// ── Suodatus ja muotoilu ──────────────────────────────────────────────────
+function filterAndFormat(rawEvents, parseDate) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() + 42);
   const seen = new Set();
   const events = [];
-  let idCounter = 10000;
+  let id = 10000;
 
   for (const r of rawEvents) {
-    const dateStr = parseDate(r.dateRaw);
+    const dateStr = parseDate(r.dateRaw || r.dateStr || '');
     if (!dateStr) continue;
-
-    const eventDate = new Date(dateStr);
-    if (eventDate < today || eventDate > cutoff) continue;
-
-    // Duplikaattisuodatus
+    const d = new Date(dateStr);
+    if (d < today || d > cutoff) continue;
     const key = `${r.name}|${dateStr}`;
     if (seen.has(key)) continue;
     seen.add(key);
-
     const { address, lat, lng, location } = venueInfo(r.venue);
-
     events.push({
-      id: idCounter++,
-      name: r.name,
-      sub: r.venue || 'Tampere',
-      dates: fmtDates(dateStr, r.timeRaw),
-      startDate: dateStr,
-      endDate: dateStr,
-      month: parseInt(dateStr.split('-')[1]),
-      cat: 'keikka',
-      location: location || r.venue || 'Tampere',
-      address,
-      lat,
-      lng,
-      price: r.price || 'Tarkista sivulta',
-      url: r.url || METELI_URL,
+      id: id++, name: r.name, sub: r.venue || 'Tampere',
+      dates: fmtDates(dateStr, r.timeRaw), startDate: dateStr, endDate: dateStr,
+      month: parseInt(dateStr.split('-')[1]), cat: 'keikka',
+      location: location || r.venue || 'Tampere', address, lat, lng,
+      price: r.price || 'Tarkista sivulta', url: r.url || METELI_URL,
       desc: `${r.name}${r.venue ? ' @ ' + r.venue : ''}`,
     });
   }
-
-  console.log(`Suodatuksen jälkeen: ${events.length} tapahtumaa (tulevat 6 viikkoa)`);
   return events;
 }
 
 // ── index.html päivitys ───────────────────────────────────────────────────
-
 function eventsToJs(events) {
   return events.map(e => {
-    const fields = [
-      `id:${e.id}`,
-      `name:${JSON.stringify(e.name)}`,
-      `sub:${JSON.stringify(e.sub)}`,
-      `dates:${JSON.stringify(e.dates)}`,
-      `startDate:${JSON.stringify(e.startDate)}`,
-      `endDate:${JSON.stringify(e.endDate)}`,
-      `month:${e.month}`,
-      `cat:${JSON.stringify(e.cat)}`,
-      `location:${JSON.stringify(e.location)}`,
-      `address:${JSON.stringify(e.address)}`,
-      `lat:${e.lat}`,
-      `lng:${e.lng}`,
-      `price:${JSON.stringify(e.price)}`,
-      `url:${JSON.stringify(e.url)}`,
-      `desc:${JSON.stringify(e.desc)}`,
+    const f = [
+      `id:${e.id}`, `name:${JSON.stringify(e.name)}`, `sub:${JSON.stringify(e.sub)}`,
+      `dates:${JSON.stringify(e.dates)}`, `startDate:${JSON.stringify(e.startDate)}`,
+      `endDate:${JSON.stringify(e.endDate)}`, `month:${e.month}`,
+      `cat:${JSON.stringify(e.cat)}`, `location:${JSON.stringify(e.location)}`,
+      `address:${JSON.stringify(e.address)}`, `lat:${e.lat}`, `lng:${e.lng}`,
+      `price:${JSON.stringify(e.price)}`, `url:${JSON.stringify(e.url)}`, `desc:${JSON.stringify(e.desc)}`,
     ];
-    return `  {${fields.join(',')}}`;
+    return `  {${f.join(',')}}`;
   }).join(',\n');
 }
 
 async function main() {
-  const events = await scrape();
+  let events = [];
+
+  // 1. Kokeile RSS
+  try {
+    const rssItems = await scrapeRSS();
+    events = filterAndFormat(rssItems, r => parseISODate(r) || parseFiDate(r));
+    console.log(`RSS-strategia: ${events.length} tulevaa tapahtumaa`);
+  } catch (err) {
+    console.log('RSS epäonnistui:', err.message, '— siirrytään Puppeteeriin');
+  }
+
+  // 2. Jos RSS antoi vähän tai ei mitään, käytä Puppeteeria
+  if (events.length < 3) {
+    try {
+      const puppeteerItems = await scrapePuppeteer();
+      const puppeteerEvents = filterAndFormat(puppeteerItems, r => parseFiDate(r));
+      console.log(`Puppeteer-strategia: ${puppeteerEvents.length} tulevaa tapahtumaa`);
+      if (puppeteerEvents.length > events.length) events = puppeteerEvents;
+    } catch (err) {
+      console.log('Puppeteer epäonnistui:', err.message);
+    }
+  }
 
   if (events.length === 0) {
-    console.log('Ei uusia tapahtumia — index.html pysyy ennallaan.');
+    console.log('Ei tapahtumia kummastakaan lähteestä — index.html pysyy ennallaan.');
     return;
   }
 
-  let html = fs.readFileSync(INDEX_PATH, 'utf8');
+  const html = fs.readFileSync(INDEX_PATH, 'utf8');
+  const START = '/* ── AUTO-SCRAPED-START – älä muokkaa tätä osiota käsin ── */';
+  const END   = '/* ── AUTO-SCRAPED-END ── */';
+  const si = html.indexOf(START), ei = html.indexOf(END);
+  if (si === -1 || ei === -1) { console.error('Merkintöjä ei löydy!'); process.exit(1); }
 
-  const startMarker = '/* ── AUTO-SCRAPED-START – älä muokkaa tätä osiota käsin ── */';
-  const endMarker   = '/* ── AUTO-SCRAPED-END ── */';
-  const startIdx = html.indexOf(startMarker);
-  const endIdx   = html.indexOf(endMarker);
-
-  if (startIdx === -1 || endIdx === -1) {
-    console.error('AUTO-SCRAPED -merkintöjä ei löydy index.html:stä!');
-    process.exit(1);
-  }
-
-  const now    = new Date().toISOString().slice(0, 10);
-  const before = html.slice(0, startIdx + startMarker.length);
-  const after  = html.slice(endIdx);
-
-  const updated = `${before}\n  /* Päivitetty: ${now} — ${events.length} tapahtumaa meteli.net:stä */\n${eventsToJs(events)},\n  ${after}`;
-
+  const now = new Date().toISOString().slice(0, 10);
+  const updated = `${html.slice(0, si + START.length)}\n  /* Päivitetty: ${now} — ${events.length} tapahtumaa */\n${eventsToJs(events)},\n  ${html.slice(ei)}`;
   fs.writeFileSync(INDEX_PATH, updated, 'utf8');
   console.log(`✓ index.html päivitetty — ${events.length} tapahtumaa`);
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(err => { console.error(err); process.exit(1); });

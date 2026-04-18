@@ -7,6 +7,6 @@
     "scrape": "node scripts/scrape-meteli.js"
   },
   "dependencies": {
-    "puppeteer-core": "^22.0.0"
+    "puppeteer": "^22.0.0"
   }
 }
