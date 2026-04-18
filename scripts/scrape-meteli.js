@@ -109,16 +109,32 @@ async function scrape() {
       console.log('Selektori ei löytynyt ajoissa — jatketaan silti');
     }
 
+    // Kuuntele browser-konsoliviestit debuggausta varten
+    page.on('console', msg => {
+      if (msg.text().startsWith('DBG:')) console.log('[browser]', msg.text());
+    });
+
     // Haetaan tapahtumadata suoraan sivun DOM:sta
     rawEvents = await page.evaluate(() => {
       const results = [];
       const SKIP = /^(löydä liput|osta liput|buy tickets|lisää tietoa|lue lisää)$/i;
       const DAY  = /^(MA|TI|KE|TO|PE|LA|SU)$/i;
-      const DATE = /^\d{1,2}\.\d{2}\.?$/;
+      // Hyväksy sekä "18.04." että "18.4." (1-2 numeroa kuukaudessa)
+      const DATE = /^\d{1,2}\.\d{1,2}\.?$/;
       const TIME = /^\d{2}:\d{2}$/;
 
-      document.querySelectorAll('article').forEach(art => {
-        // Pilko innerText riveiksi, siivoa tyhjät ja CTA-tekstit
+      const articles = document.querySelectorAll('article');
+
+      // Debug: loggaa ensimmäisen artiklan rivit
+      if (articles.length > 0) {
+        const firstLines = (articles[0].innerText || '')
+          .split('\n').map(l => l.trim()).filter(l => l.length > 0).slice(0, 10);
+        console.log('DBG: artikloita=' + articles.length + ' | ensimmäinen:', JSON.stringify(firstLines));
+      } else {
+        console.log('DBG: ei yhtään article-elementtiä');
+      }
+
+      articles.forEach(art => {
         const lines = (art.innerText || '')
           .split('\n')
           .map(l => l.trim())
@@ -126,23 +142,19 @@ async function scrape() {
 
         if (lines.length < 3) return;
 
-        // Etsi viikonpäivä ("LA") ja päivämäärä ("18.04.")
         const dayIdx  = lines.findIndex(l => DAY.test(l));
         const dateIdx = lines.findIndex(l => DATE.test(l));
         if (dateIdx === -1) return;
 
-        // Nimi on ensimmäinen "normaali" rivi päivämäärän jälkeen
         const afterDate = Math.max(dayIdx, dateIdx) + 1;
         const name = lines[afterDate];
         if (!name || name.length < 2) return;
 
-        // Päivä + päivämäärä raakadataksi
         const dateRaw = [
           dayIdx >= 0 ? lines[dayIdx] : '',
           lines[dateIdx],
         ].filter(Boolean).join(' ');
 
-        // Paikka ja hinta: seuraava rivi nimen jälkeen ("Nokia-areena, Tampere - alk. 59,90")
         const venuePriceLine = lines[afterDate + 1] || '';
         let venue = '';
         let price = '';
