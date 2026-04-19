@@ -175,6 +175,22 @@ async function fetchMeteliEvents() {
 }
 
 function buildMeteliEvents(items, venueMap, today, cutoff) {
+  // Tunnista bulk-import: jos yli 30 % tapahtumista jakaa saman päivän,
+  // meteli.net:n date-kenttä on julkaisupäivä eikä tapahtumapäivä.
+  // Tässä tapauksessa koko erä on hyödytön ja ohitetaan.
+  const dateCounts = {};
+  for (const item of items) {
+    const d = (item.date || '').slice(0, 10);
+    dateCounts[d] = (dateCounts[d] || 0) + 1;
+  }
+  const maxCount = Math.max(...Object.values(dateCounts));
+  if (items.length > 0 && maxCount / items.length > 0.30) {
+    const bulkDate = Object.keys(dateCounts).find(d => dateCounts[d] === maxCount);
+    console.log(`  VAROITUS: bulk-import havaittu (${maxCount}/${items.length} tapahtumaa päivällä ${bulkDate})`);
+    console.log('  meteli.net-data ohitetaan — date-kenttä ei ole tapahtumapäivä.');
+    return [];
+  }
+
   const seen = new Set();
   const events = [];
   let id = 10000;
