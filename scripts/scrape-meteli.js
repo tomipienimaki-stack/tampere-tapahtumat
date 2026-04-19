@@ -1,9 +1,9 @@
 /**
  * scrape-meteli.js
- * Hakee tulevat Tampere-tapahtumat kahdesta lähteestä:
- *   1. meteli.net  – WordPress REST API (keikat/konsertit)
+ * Hakee tulevat Tampere-tapahtumat kolmesta lähteestä:
+ *   1. meteli.net            – WordPress REST API (keikat/konsertit)
  *   2. tapahtumat.tampere.fi – Tampereen kaupungin virallinen tapahtumakalenteri
- *      (kulttuuri, urheilu, festivaalit, lapset, teatteri, ruoka, ...)
+ *   3. tiketti.fi            – Lippupalvelu (keikat, urheilu, teatteri, festivaalit)
  *
  * Ajo:  node scripts/scrape-meteli.js
  * CI:   GitHub Actions joka maanantai
@@ -25,6 +25,19 @@ const TAMPERE_ID = 299; // kaupunki-taxonomy ID meteli.net:ssä
 const TAMPERE_CAL_URL = 'https://tapahtumat.tampere.fi/api/search/internal-content-fetch';
 const TAMPERE_CAL_PARAMS = 'lang=fi&country=FI&apiKey=634844c32f41a024ee51a234&out=JSON&sort=startDate&strictSort=true';
 const TAMPERE_CAL_FRONTEND = 'https://tapahtumat.tampere.fi/fi-FI';
+
+// ── tiketti.fi ────────────────────────────────────────────────────────────
+// /tapahtumat/d/{any} palauttaa kaikki suomalaiset tapahtumat yhtenä JSON-objektina.
+// Suodatamme Tampere-paikat city-kentän perusteella client-side.
+const TIKETTI_DATA_URL = 'https://www.tiketti.fi/tapahtumat/d/all';
+const TIKETTI_BASE = 'https://www.tiketti.fi';
+// Tiketti-tagit → sovelluksen cat
+// Tag-ryhmä 1: pääkategoriat
+const TIKETTI_CAT = { '1':'keikka','2':'urheilu','3':'teatteri','43':'iso','57':'teatteri','66':'ruoka','84':'taide','110':'lapset' };
+// Musiikki-alityyli → konsertti
+const TIKETTI_KONSERT_STYLES = new Set(['41','65','67','68']); // Klassinen, Gospel, Kuoro, Big Band
+// Festivaali-tagi → iso
+const TIKETTI_FESTIVAL_TAG = '39';
 
 // ── Tunnetut keikapaikat ──────────────────────────────────────────────────
 const VENUE_COORDS = {
@@ -306,23 +319,150 @@ function buildTampereCalEvents(pages, today, cutoff) {
   return events;
 }
 
+// ── 3. tiketti.fi ─────────────────────────────────────────────────────────
+async function fetchTikettiData() {
+  console.log('\n=== tiketti.fi ===');
+  try {
+    const { json } = await apiFetch(TIKETTI_DATA_URL);
+    const events = json.events || [];
+    const locs = json.locations || {};
+    const tags = json.tags || {};
+    const keys = json.keys || [];
+    console.log(`  Haettu: ${events.length} tapahtumaa yhteensä`);
+    return { events, locs, tags, keys };
+  } catch (e) {
+    console.log('  Virhe:', e.message);
+    return { events: [], locs: {}, tags: {}, keys: [] };
+  }
+}
+
+function parseTikettiPrice(raw) {
+  if (!raw) return 'Tarkista sivulta';
+  return raw.replace(/&euro;/g, '€').replace(/&amp;/g, '&').replace(/alk\.\s*/i, 'alk. ').trim();
+}
+
+function tikettiCategory(eventTags) {
+  const tagSet = new Set(eventTags.map(String));
+  // Festivaali → iso
+  if (tagSet.has(TIKETTI_FESTIVAL_TAG)) return 'iso';
+  // Pääkategoria-järjestys: urheilu, lapset, ruoka, teatteri, viihde, musiikki
+  for (const [id, cat] of Object.entries(TIKETTI_CAT)) {
+    if (tagSet.has(id)) {
+      // Musiikki: tarkista onko konsertti-alatyyli
+      if (id === '1') {
+        for (const s of TIKETTI_KONSERT_STYLES) {
+          if (tagSet.has(s)) return 'konsertti';
+        }
+        return 'keikka';
+      }
+      return cat;
+    }
+  }
+  return 'keikka';
+}
+
+function buildTikettiEvents({ events, locs, tags, keys }, today, cutoff) {
+  const K = Object.fromEntries(keys.map((k, i) => [k, i]));
+
+  // Tampere-paikkojen ID:t
+  const tampereLocIds = new Set(
+    Object.entries(locs)
+      .filter(([, loc]) => typeof loc === 'object' && loc.city === 'Tampere')
+      .map(([id]) => id)
+  );
+
+  const result = [];
+  let id = 30000;
+  const seen = new Set();
+
+  const twoWeeksAgo = new Date(today);
+  twoWeeksAgo.setDate(today.getDate() - 14);
+
+  // Tagit joita ei näytetä (lahjakortit, kausikortit)
+  const SKIP_TAGS = new Set(['89', '90', '42']); // Lahjakortti, Kausikortti, Tuote
+
+  for (const ev of events) {
+    const locId = String(ev[K.locationID] || '');
+    if (!tampereLocIds.has(locId)) continue;
+
+    // Ohita lahjakortit ja kausikortit
+    const evTags = (ev[K.tags] || []).map(String);
+    if (evTags.some(t => SKIP_TAGS.has(t))) continue;
+
+    const startDate = String(ev[K.start_date] || '').slice(0, 10);
+    const endDate   = String(ev[K.end_date]   || startDate).slice(0, 10);
+    if (!startDate) continue;
+
+    const d    = new Date(startDate);
+    const dEnd = new Date(endDate);
+    if (dEnd < today) continue;
+    if (d > cutoff) continue;
+    // Ohita tapahtumat jotka ovat alkaneet yli 14 pv sitten
+    if (d < twoWeeksAgo) continue;
+
+    const name = decodeHtml(String(ev[K.name] || '').trim());
+    if (!name) continue;
+
+    const key = `${name.toLowerCase()}|${startDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const loc = locs[locId] || {};
+    const venueName = loc.name || '';
+    const { address, lat, lng } = venueCoords(venueName);
+
+    const rawPrice = String(ev[K.priceinfo] || '');
+    const price = parseTikettiPrice(rawPrice);
+
+    const relUrl = String(ev[K.url] || '');
+    const url = relUrl ? TIKETTI_BASE + relUrl : TIKETTI_BASE;
+
+    const cat = tikettiCategory(ev[K.tags] || []);
+    const dates = isoFmtRange(startDate, endDate);
+
+    result.push({
+      id: id++,
+      name,
+      sub: venueName || 'Tampere',
+      dates,
+      startDate,
+      endDate,
+      month: parseInt(startDate.split('-')[1]),
+      cat,
+      location: venueName || 'Tampere',
+      address: address || 'Tampere',
+      lat,
+      lng,
+      price,
+      url,
+      desc: name,
+      _source: 'tiketti',
+      _key: key,
+    });
+  }
+  return result;
+}
+
 // ── Yhdistä ja deduploi ───────────────────────────────────────────────────
-function mergeAndDedup(meteliEvents, tampereEvents) {
-  // meteli.net on ensisijainen keikkalähde — sen tapahtumat eivät tarvitse
-  // päällekkäisyystarkistusta, koska ne ovat yleensä tarkempia.
-  // tapahtumat.tampere.fi lisää kaikki muut kategoriat.
-  const meteliKeys = new Set(meteliEvents.map(e => e._key));
+function mergeAndDedup(meteliEvents, tampereEvents, tikettiEvents) {
+  // Prioriteetti: meteli.net > tiketti.fi > tapahtumat.tampere.fi
+  // Deduplointi nimi+päivä-avaimella.
+  const usedKeys = new Set();
 
-  // Poista tampere-cal:sta tapahtumat joilla sama nimi+päivä kuin meteli:ssä
-  const dedupedTampere = tampereEvents.filter(e => !meteliKeys.has(e._key));
+  const out = [];
+  for (const src of [meteliEvents, tikettiEvents, tampereEvents]) {
+    for (const e of src) {
+      if (!usedKeys.has(e._key)) {
+        usedKeys.add(e._key);
+        out.push(e);
+      }
+    }
+  }
 
-  const all = [...meteliEvents, ...dedupedTampere];
-  // Poista sisäiset _source ja _key -kentät
-  for (const e of all) { delete e._source; delete e._key; }
-
-  // Järjestä päivämäärän mukaan
-  all.sort((a, b) => a.startDate.localeCompare(b.startDate));
-  return all;
+  // Poista sisäiset kentät
+  for (const e of out) { delete e._source; delete e._key; }
+  out.sort((a, b) => a.startDate.localeCompare(b.startDate));
+  return out;
 }
 
 // ── Kirjoita index.html ───────────────────────────────────────────────────
@@ -362,8 +502,13 @@ async function main() {
   const calEvents = buildTampereCalEvents(calPages, today, cutoff);
   console.log(`  Tulevat tapahtumat: ${calEvents.length}`);
 
+  // 3. tiketti.fi
+  const tikettiData = await fetchTikettiData();
+  const tikettiEvents = buildTikettiEvents(tikettiData, today, cutoff);
+  console.log(`  Tampere-tapahtumat: ${tikettiEvents.length}`);
+
   // Yhdistä
-  const events = mergeAndDedup(meteliEvents, calEvents);
+  const events = mergeAndDedup(meteliEvents, calEvents, tikettiEvents);
   console.log(`\nYhteensä (deduplikoitu): ${events.length} tapahtumaa`);
 
   if (events.length === 0) { console.log('Ei tapahtumia — index.html ennallaan.'); return; }
@@ -380,7 +525,7 @@ async function main() {
   if (si === -1 || ei === -1) { console.error('Merkinnät puuttuu!'); process.exit(1); }
 
   const now = new Date().toISOString().slice(0, 10);
-  const out = `${html.slice(0, si + S.length)}\n  /* Päivitetty: ${now} — ${events.length} tapahtumaa (meteli.net + tapahtumat.tampere.fi) */\n${eventsToJs(events)},\n  ${html.slice(ei)}`;
+  const out = `${html.slice(0, si + S.length)}\n  /* Päivitetty: ${now} — ${events.length} tapahtumaa (meteli.net + tapahtumat.tampere.fi + tiketti.fi) */\n${eventsToJs(events)},\n  ${html.slice(ei)}`;
   fs.writeFileSync(INDEX_PATH, out);
   console.log('\n✓ index.html päivitetty');
 }
